@@ -6,11 +6,13 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.parse import urlsplit
 
 PANDA_SELECTORS = ("auto", "auto:cost", "auto:quality", "panel:panda", "panel:panda-quality")
 # These raw grants make a router eligible. The integration runner never selects a backend for a successful turn.
-BACKEND_GRANTS = ("glm-5.3", "deepseek-v4.1-flash")
+_grant_file = Path(__file__).resolve().parents[2] / "src" / "routing-backend-grants.json"
+BACKEND_GRANTS = tuple(json.loads(_grant_file.read_text(encoding="utf-8")))
 MODELS = (*PANDA_SELECTORS, *BACKEND_GRANTS, "unknown-test-model")
 SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "x-api-key", "api-key", "cookie"}
 

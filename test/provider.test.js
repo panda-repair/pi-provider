@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import backendGrants from "../src/routing-backend-grants.json" with { type: "json" };
 import { catalog, compat, modelDefinitions } from "../src/catalog.js";
 import { createHash } from "node:crypto";
 import { createPandaProvider, defaultBaseUrl, normalizeBaseUrl, permittedModels } from "../src/provider.js";
 
 const baseUrl = "http://127.0.0.1:8100/v1";
-const backendGrants = ["glm-5.3", "deepseek-v4.1-flash"];
 const ids = ["auto", "auto:cost", "auto:quality", "panel:panda", "panel:panda-quality"];
 const signal = new AbortController().signal;
 
@@ -125,6 +125,8 @@ test("a rejected generation cannot overwrite the current catalog", async () => {
 
 test("router IDs require a listed coding route and the router's own grant", () => {
   const routers = ["auto", "auto:cost", "auto:quality"];
+  assert.equal(new Set(backendGrants).size, 2);
+  assert.ok(backendGrants.every(id => typeof id === "string" && !ids.includes(id)));
   const get = ids => permittedModels(ids.map(id => ({ id })), baseUrl).map(row => row.id);
   assert.deepEqual(get([...routers, "gemma-4-26b", "panel:panda-quality"]), ["panel:panda-quality"]);
   assert.deepEqual(get(backendGrants), []);

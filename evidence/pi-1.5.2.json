@@ -1,6 +1,6 @@
 {
   "date": "2026-11-20",
-  "comparisonBase": "88bc3ba",
+  "comparisonBase": "39c9e3f",
   "package": "@panda-repair/pi-provider@0.1.0",
   "scope": "Pi 1.5.2 with local transports, synthetic credentials and simulated charges",
   "sources": {
@@ -121,9 +121,9 @@
     }
   },
   "archive": {
-    "sha256": "c95e601b96f9bb524e6d15238bb2cda02ee7203ec8045712f60632ceac8b2207",
-    "bytes": 14434,
-    "unpackedBytes": 41749,
+    "sha256": "1160e91d2b825c78e01b73952b6eb15f164896d8cb3066e3e9c034dbff028270",
+    "bytes": 14517,
+    "unpackedBytes": 41870,
     "members": [
       "LICENSE",
       "README.md",
@@ -133,6 +133,7 @@
       "src/errors.js",
       "src/provider.js",
       "src/request.js",
+      "src/routing-backend-grants.json",
       "src/usage.js"
     ],
     "sourceHashes": {
@@ -142,8 +143,9 @@
       "package.json": "7b3e8eb306f2216053b01e78b1aff44457b8621917b08f8c7eb3a463f6ad99b8",
       "src/catalog.js": "7fc3397e3857559b4d4ef2f6413a0cd775eb320507a9522cd5200d002f129dca",
       "src/errors.js": "68ebfdc298ae541152f355ae8c096959651b2d5f35dc81782f46afd4004e1560",
-      "src/provider.js": "bf8be96721b7f30188ea19aa2339b0ad127bcdbf7099ecfc07158376484b1302",
+      "src/provider.js": "2c1173b285ddb68ddf27ec64bcd07cc58b42838dc246fe63a4ee86d59029a64a",
       "src/request.js": "7c9f1eaf809ba26553dc8bf86339d2e6e75ca28085d2e7ec3520d95d1a99a42d",
+      "src/routing-backend-grants.json": "be75d8e22fbb34cae2556b37877e2ff96f064b83f4c97cad6325aa90170ebe98",
       "src/usage.js": "4d0c10cdaa2309a317f04bb207f3cea100b8790e2fce32156aa1c130e140af68"
     },
     "dryRunMatches": true
@@ -186,6 +188,48 @@
       "rewrittenChatPOST": 0
     },
     "resumedNewPrompt": "Pi selected the permitted Auto fallback. A token with no grants produced zero Chat POSTs.",
-    "independentReportHash": "073e2745650a1fe5d2c8d5625859f3439f5ac84f07549334b7cb823ea73d306c"
+    "independentReportHash": "a7207a2b25e4af05c6aaf81c70b0188c5d5d494a2213c651d2796393098f264f",
+    "automaticResumeFollowup": {
+      "firstPass": {
+        "exit": 1,
+        "catalogGET": 0,
+        "chatPOST": 0,
+        "diagnostic": "No API key found for the selected model."
+      },
+      "additionalFreshCandidateHomes": {
+        "attempts": 4,
+        "noModel": 1
+      },
+      "withIdenticalCacheAndSession": {
+        "current": {
+          "attempts": 6,
+          "noModel": 1
+        },
+        "39c9e3f": {
+          "attempts": 6,
+          "noModel": 1
+        },
+        "88bc3ba": {
+          "attempts": 6,
+          "noModel": 1
+        }
+      },
+      "explicitAutoOnIdenticalState": {
+        "attempts": 6,
+        "completed": 6,
+        "catalogGETPerPrompt": 1,
+        "chatPOSTPerPrompt": 1
+      }
+    }
+  },
+  "routingGrantSource": {
+    "file": "src/routing-backend-grants.json",
+    "authorizationBackendCount": 2,
+    "literalSearchPaths": [
+      "test",
+      "README.md",
+      "src/catalog.js"
+    ],
+    "literalMatches": 0
   }
 }

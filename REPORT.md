@@ -6,7 +6,7 @@ STATUS: complete
 
 ## Review findings
 
-The original review compared `225cbd1` to the fixes below. The current five-selector change starts at `88bc3ba` and follows Panda’s coding-agent guide at `a9732484`. Zero’s slice C contract is pinned to `153bfde8`. The right-hand column identifies each original fix. [Runtime](src) · [Unit and integration checks](test)
+The original review compared `225cbd1` to the fixes below. The five-selector catalog introduced after `88bc3ba` follows Panda’s coding-agent guide at `a9732484`. Zero’s slice C contract is pinned to `153bfde8`. The right-hand column identifies each original fix. [Runtime](src) · [Unit and integration checks](test)
 
 | Finding | Change and observed check | Commit |
 | --- | --- | --- |
@@ -28,11 +28,19 @@ The original review compared `225cbd1` to the fixes below. The current five-sele
 
 ## Release verification
 
+The provider, JavaScript tests and Python fixture read the two backend grant IDs from one source. A case-insensitive scan of the tests, README and selector catalog found zero literal backend IDs. [Routing grant data](src/routing-backend-grants.json)
+
 The checkout passed 27 unit tests and 53 real Pi scenarios. Five file-tool turns, 19 fault cases, seven dialect cases, 20 native-host cases and two attempted model substitutions produced 55 catalog GETs and 87 Chat POSTs. Every POST named an owned selector, used the expected bearer and carried one valid idempotency key. Both retired IDs were refused in typed, configured and rewritten requests before a Chat POST. The earlier 17-body comparison with Zero’s real admission code belongs to revision `88bc3ba`. [Checkout runner](test/e2e.py) · [Recorded results](evidence/pi-1.5.2.json)
 
 An independent offline install of the final tarball passed 39 native Pi scenarios, including 30 catalog, cache, session and tool checks and nine retained safety checks. Each of the five selectors returned the expected marker from Pi’s read tool. Across these tests the new package made 52 GETs and 31 POSTs. Preparing genuine upgrade fixtures with `88bc3ba` accounted for another 13 GETs and five POSTs. Opening an older session without a prompt produced zero network requests. With a new prompt, Pi could fall back to an authorized Auto selector. Explicit retired-model requests sent zero Chat POSTs. [Verification evidence](evidence/pi-1.5.2.json)
 
-The dry run and actual npm pack contained nine files, including the approved MIT license. The archive is 14,434 bytes, with 41,749 bytes unpacked. Its SHA-256 is `c95e601b96f9bb524e6d15238bb2cda02ee7203ec8045712f60632ceac8b2207`. The independently installed archive matched the checkout byte-for-byte. [Package manifest](package.json) · [License](LICENSE)
+One earlier automatic resume exited with “No API key found for the selected model” before any network request, despite a valid configured credential and matching cache. With identical saved state, one of six attempts did this on each of the current archive, `39c9e3f` and `88bc3ba`. Pi 1.5.2 reads its model availability snapshot during startup while a cache-only refresh can still be pending. An explicit model avoids that fallback. The following command completed six out of six times on the same saved state, with one catalog GET and one authorized Chat POST per prompt.
+
+```sh
+pi -p --session /path/to/saved-session.jsonl --model panda/auto "Continue the saved conversation."
+```
+
+The dry run and actual npm pack contained ten files, including the approved MIT license and the routing grant data the provider uses for discovery. The archive is 14,517 bytes, with 41,870 bytes unpacked. Its SHA-256 is `1160e91d2b825c78e01b73952b6eb15f164896d8cb3066e3e9c034dbff028270`. The independently installed archive matched the checkout byte-for-byte. [Package manifest](package.json) · [License](LICENSE)
 
 To reproduce from the repository root, use Node on PATH and a new output directory on macOS. The integration runner isolates Pi's home and permits only loopback client networking.
 

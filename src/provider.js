@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import routingBackendGrants from "./routing-backend-grants.json" with { type: "json" };
 import { modelDefinitions } from "./catalog.js";
 import { boundedJSON, describeError } from "./errors.js";
 import { createRequestKeys, pandaStream } from "./request.js";
@@ -23,7 +24,7 @@ function inferenceToken(value) {
 export function permittedModels(data, url) {
   if (!Array.isArray(data)) throw new Error("Panda model discovery returned an invalid model list.");
   const raw = new Set(data.map(entry => entry?.id));
-  const direct = raw.has("glm-5.3") || raw.has("deepseek-v4.1-flash");
+  const direct = routingBackendGrants.some(id => raw.has(id));
   const codingRoute = direct || raw.has("panel:panda");
   return modelDefinitions(url).filter(model => raw.has(model.id) &&
     (!model.id.startsWith("auto") || (model.id === "auto:cost" ? direct : codingRoute)));

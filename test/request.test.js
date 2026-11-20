@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import backendGrants from "../src/routing-backend-grants.json" with { type: "json" };
 import { describeError } from "../src/errors.js";
 import { createRequestKeys, pandaStream } from "../src/request.js";
 
@@ -295,13 +296,17 @@ test("peer extensions cannot substitute the paid target and backend names remain
   const request = pandaStream(fakeNative, keys, () => {});
   const params = { model: "auto:cost", messages: [{ role: "user", content: "Compare the backend IDs." }] };
   const options = { apiKey: "fixture", sessionId: "target", fetch: async () => { dispatched++; return new Response(""); } };
-  for (const replacement of ["glm-5.3", "deepseek-v4.1-flash", "panel:panda", "unknown", undefined]) {
+  for (const replacement of [...backendGrants, "panel:panda", "unknown", undefined]) {
     const events = request(model, { body: params }, { ...options, onPayload: payload => ({ ...payload, model: replacement }) });
     await assert.rejects(events.result(), /differs from the selected/);
   }
   assert.equal(dispatched, 0);
   const panel = { ...model, id: "panel:panda" };
-  const literal = { model: panel.id, messages: [{ role: "user", content: "glm-5.3" }], panda: { synthesizer_model: "deepseek-v4.1-flash" } };
+  const literal = {
+    model: panel.id,
+    messages: [{ role: "user", content: backendGrants[0] }],
+    panda: { synthesizer_model: backendGrants[1] },
+  };
   await request(panel, { body: literal }, { ...options, fetch: async (_url, init) => {
     assert.equal(init.body, JSON.stringify(literal));
     dispatched++;
