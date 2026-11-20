@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { catalog, permittedModels } from "./catalog.js";
+import { boundedJSON, describeError } from "./errors.js";
 import { createRequestKeys, pandaStream } from "./request.js";
 
 export const defaultBaseUrl = "https://app.panda.repair/v1";
@@ -22,18 +23,16 @@ function scope(url, token) {
   return token ? "panda-v1-" + createHash("sha256").update(url).update("\0").update(token).digest("hex") : undefined;
 }
 
-export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys = createRequestKeys() }) {
+export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys = createRequestKeys(), observe }) {
   let endpoint = baseUrl;
+  let hostEndpoint;
   let effective;
   let cached;
   let granted = [];
 
-  function visible() {
-    return effective && effective === cached ? granted : [];
-  }
-
   function restore(url, entry) {
     endpoint = url;
+    hostEndpoint = url;
     cached = entry?.etag;
     granted = Array.isArray(entry?.models) ? permittedModels(entry.models, url) : [];
   }
@@ -42,11 +41,12 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
     const token = inferenceToken(credential?.key ?? await ctx.env("PANDA_API_TOKEN"));
     signal.throwIfAborted();
     effective = scope(endpoint, token);
-    if (token) return { auth: { apiKey: token }, source: credential?.key ? "stored Panda token" : "PANDA_API_TOKEN" };
+    if (token) return { auth: { apiKey: token, ...(hostEndpoint && { baseUrl: hostEndpoint }) }, source: credential?.key ? "stored Panda token" : "PANDA_API_TOKEN" };
   }
 
   function assertAvailable(model, key) {
-    if (normalizeBaseUrl(model.baseUrl) !== endpoint || !cached || scope(endpoint, inferenceToken(key)) !== cached ||
+    if (model.api !== "openai-completions" || normalizeBaseUrl(model.baseUrl) !== endpoint || !cached ||
+        scope(endpoint, inferenceToken(key)) !== cached ||
         !granted.some(entry => entry.id === model.id)) {
       throw new Error("This Panda credential has no cached grant for the selected model at this endpoint. Refresh in an interactive Pi session.");
     }
@@ -55,6 +55,9 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
   const definitions = permittedModels(catalog, baseUrl);
   return {
     id: "panda", name: "Panda", baseUrl,
+    acceptsTarget(model) {
+      return model.api === "openai-completions" && (!hostEndpoint || normalizeBaseUrl(model.baseUrl) === hostEndpoint);
+    },
     auth: { apiKey: {
       name: "Panda inference token",
       async login(interaction) {
@@ -68,13 +71,14 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
     } },
     // Pi's models.json composer selects the native transport by API, even when a user
     // explicitly types an unlisted model. Keep that transport reachable on an empty grant.
-    getModels: () => visible().length ? visible() : definitions,
-    getAllModels: () => visible().length ? visible() : definitions,
+    getModels: () => cached && effective === cached ? (granted.length ? granted : definitions.slice(0, 1)) : definitions,
+    getAllModels: () => cached && effective === cached ? granted : definitions,
     filterModels(models, credential) {
       const identity = credential?.key ? scope(endpoint, inferenceToken(credential.key)) : effective;
       if (!cached || identity !== cached) return [];
       const allowed = new Set(granted.map(model => model.id));
-      return models.filter(model => model.provider === "panda" && model.baseUrl === endpoint && allowed.has(model.id));
+      return models.filter(model => model.provider === "panda" && model.api === "openai-completions" &&
+        model.baseUrl === endpoint && allowed.has(model.id));
     },
     async refreshModels({ credential, allowNetwork, baseUrl: override, stored, publish, signal }) {
       const url = normalizeBaseUrl(override ?? baseUrl);
@@ -99,10 +103,12 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
           throw new Error();
         }
         if (!response.ok) {
+          const error = describeError(response.status, await boundedJSON(response), response.headers);
           void response.body?.cancel().catch(() => {});
-          throw new DiscoveryError("Panda model discovery returned HTTP " + response.status + ".");
+          throw new DiscoveryError("Panda model discovery failed. " + error.message);
         }
-        const body = await response.json();
+        const body = await boundedJSON(response, 512 * 1024, 10_000);
+        void response.body?.cancel().catch(() => {});
         const entry = { etag: fingerprint, models: permittedModels(body?.data, url), checkedAt: Date.now() };
         await publish({ persist: entry, update() { effective = fingerprint; restore(url, entry); } });
       } catch (error) {
@@ -112,8 +118,8 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
         throw new Error("Could not read the Panda model catalog. Check your endpoint and credentials.");
       }
     },
-    stream: pandaStream(streams.stream, keys, assertAvailable),
-    streamSimple: pandaStream(streams.streamSimple, keys, assertAvailable),
+    stream: pandaStream(streams.stream, keys, assertAvailable, observe),
+    streamSimple: pandaStream(streams.streamSimple, keys, assertAvailable, observe),
   };
 }
 

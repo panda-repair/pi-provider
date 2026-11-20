@@ -25,7 +25,7 @@ function rig() {
 test("the seven allowed, text-only models use the Panda adapter and their per-selector compaction windows", () => {
   const windows = {
     "glm-5.3": 258_000, "deepseek-v4.1-flash": 258_000, "auto:cost": 258_000,
-    "panel:panda": 224_000, "panel:panda-quality": 224_000, auto: 224_000, "auto:quality": 224_000,
+    "panel:panda": 224_000, "panel:panda-quality": 224_000, auto: 224_000, "auto:quality": 187_000,
   };
   assert.deepEqual(catalog.map(model => model.id), ids);
   const models = permittedModels([...ids.map(id => ({ id })), { id: "auto" }, { id: "unknown" }], baseUrl);
@@ -105,7 +105,7 @@ test("failed, switched, or removed credentials cannot retain a previous model gr
   await refresh();
   assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["panel:panda"]);
   respond(() => new Response("private error detail", { status: 403 }));
-  await assert.rejects(refresh(), { message: "Panda model discovery returned HTTP 403." });
+  await assert.rejects(refresh(), { message: "Panda model discovery failed. Panda returned HTTP 403." });
   assert.deepEqual(provider.filterModels(provider.getModels(), undefined), []);
   key(undefined);
   const previous = requests.length;
@@ -127,7 +127,7 @@ test("router IDs require a listed coding route and the router's own grant", () =
   assert.deepEqual(get([...routers, "gemma-4-26b", "panel:panda-quality"]), ["panel:panda-quality"]);
   assert.deepEqual(get(["glm-5.3"]), ["glm-5.3"]);
   for (const id of ["glm-5.3", "deepseek-v4.1-flash", "panel:panda"]) {
-    for (const router of routers) assert.ok(get([router, id]).includes(router));
+    for (const router of routers) assert.equal(get([router, id]).includes(router), id !== "panel:panda" || router !== "auto:cost");
   }
 });
 
@@ -141,6 +141,10 @@ test("host-only discovery binds cached grants to resolved endpoint, scoped crede
   await auth();
   await refresh({ baseUrl: override, credential: { key: scoped } });
   assert.equal(requests[0].url, override + "/models");
+  assert.equal((await auth()).auth.baseUrl, override);
+  assert.equal(provider.acceptsTarget({ api: "openai-completions", baseUrl: override }), true);
+  assert.equal(provider.acceptsTarget({ api: "openai-responses", baseUrl: override }), false);
+  assert.equal(provider.acceptsTarget({ api: "openai-completions", baseUrl }), false);
   const snapshot = cached();
   assert.ok(!JSON.stringify(snapshot).includes(scoped));
   await refresh({ allowNetwork: false, baseUrl: override, credential: undefined });
@@ -164,4 +168,14 @@ test("discovery failures expose no upstream body or transport details", async ()
     await assert.rejects(refresh(), { message: "Could not read the Panda model catalog. Check your endpoint and credentials." });
     assert.deepEqual(provider.filterModels(provider.getModels(), undefined), []);
   }
+});
+
+test("an authenticated empty grant stays empty in both registered and available inventories", async () => {
+  const { provider, refresh, respond } = rig();
+  assert.equal(provider.getModels().length, 7);
+  respond(() => Response.json({ data: ["auto","auto:cost","auto:quality","gemma-4-26b"].map(id=>({id})) }));
+  await refresh();
+  assert.deepEqual(provider.getModels().map(model => model.api), ["openai-completions"]);
+  assert.deepEqual(provider.getAllModels(), []);
+  assert.deepEqual(provider.filterModels([{ ...catalog[0], provider: "panda", baseUrl }], undefined), []);
 });

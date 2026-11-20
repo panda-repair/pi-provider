@@ -18,5 +18,18 @@ def refusal(body):
         dialect = schema.get("$schema")
         if "$schema" in schema and (not isinstance(dialect, str) or not re.fullmatch(
                 r"https?://json-schema\.org/(?:draft/2020-12|draft/2019-09|draft-07)/schema#?", dialect)):
-            return 400, "unsupported_parameter", f"tools[{i}].function.parameters"
+            return 400, "invalid_request", f"tools[{i}].function.parameters"
+        # Representative slice-C refusals. The production API owns full schema validation.
+        reference = schema.get("$ref")
+        rejected = False
+        if isinstance(reference, str):
+            rejected = bool(re.search(r"%(?![0-9a-fA-F]{2})", reference))
+            if reference.startswith("#/$defs/"):
+                target = (schema.get("$defs") or {}).get(reference.removeprefix("#/$defs/"))
+                rejected |= not isinstance(target, dict)
+        if dialect or reference:
+            rejected |= "prefixItems" in schema and "items" in schema
+            rejected |= "patternProperties" in schema and schema.get("additionalProperties") is False
+        if rejected:
+            return 400, "invalid_request", f"tools[{i}].function.parameters"
     return None

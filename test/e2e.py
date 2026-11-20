@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
 import subprocess
 import sys
 import threading
@@ -66,8 +67,8 @@ def main():
               '(deny file-write*)(allow file-write* (subpath ' + json.dumps(str(out)) + ') ' \
               '(literal "/dev/null") (literal "/dev/tty") (subpath "/dev/fd"))'
 
-    def run(arguments, label, expect=0):
-        command = ["/usr/bin/sandbox-exec", "-p", profile, str(pi), *arguments]
+    def run(arguments, label, expect=0, program=None):
+        command = ["/usr/bin/sandbox-exec", "-p", profile, *(program or [str(pi)]), *arguments]
         result = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, timeout=60)
         (out / (label + ".stdout")).write_text(result.stdout)
@@ -82,13 +83,14 @@ def main():
     run(["install", str(ROOT)], "install")
     summary = {"pi": version, "models": {}}
     seen_keys = set()
-    def capture(label, model, fault=None, extension=False, expect=0):
+    def capture(label, model, fault=None, extension=False, expect=0, native=None, check_cache=False):
         folder = out / "captures" / label
         folder.mkdir(parents=True)
         fixture = work / "capture-fixture.txt"
         marker = "PANDA_READ_" + secrets.token_hex(12)
         fixture.write_text(marker + "\n")
         with ThreadingHTTPServer(("127.0.0.1", 0), mock.Handler) as server:
+            server.expected_token = env["PANDA_API_TOKEN"]
             server.refusal = admission.refusal
             server.fixture = fixture
             server.hold = 0.02
@@ -99,8 +101,24 @@ def main():
             try:
                 env["PANDA_BASE_URL"] = f"http://127.0.0.1:{server.server_port}/v1"
                 extra = ["-e", str(ROOT / "test/fixtures/referenced-tool.mjs")] if extension else []
-                result = run([*extra, "-p", "--no-session", "--model", "panda/" + model,
-                              "Read capture-fixture.txt with the read tool and give its first line."], label, expect)
+                if check_cache:
+                    cold = run(["--list-models", "panda"], label + "-cold")
+                    assert "glm-5.3" not in cold.stdout and server.recorder.next_id == 1
+                    env["PI_OFFLINE"] = "1"
+                    run(["-p", "--no-session", "--model", "panda/" + model, "Hello"], label + "-offline", 1)
+                    env.pop("PI_OFFLINE")
+                    assert server.recorder.next_id == 1
+                if native:
+                    result = run([str(pi.parents[1]), native, model], label, expect,
+                                 program=["node", str(ROOT / "test/fixtures/native.mjs")])
+                else:
+                    result = run([*extra, "-p", "--no-session", "--model", "panda/" + model,
+                                  "Read capture-fixture.txt with the read tool and give its first line."], label, expect)
+                if check_cache:
+                    count = server.recorder.next_id
+                    warm = run(["--list-models", "panda"], label + "-warm")
+                    assert all(model_id in warm.stdout for model_id in MODEL_IDS)
+                    assert server.recorder.next_id == count
             finally:
                 server.shutdown()
                 thread.join()
@@ -108,7 +126,14 @@ def main():
         listed = [r for r in records if r["method"] == "GET" and r["path"] == "/v1/models"]
         chat = [r for r in records if r["method"] == "POST" and r["path"] == "/v1/chat/completions"]
         assert listed and len(records) == len(listed) + len(chat), label
-        assert all(r["body"]["model"] == model for r in chat), label
+        for record in records:
+            header = {k.lower(): v for k, v in record["headers"]}
+            assert record["fixture_bearer_verified"] and header.get("authorization") == "[REDACTED]" and record["path"] in ("/v1/models", "/v1/chat/completions"), label
+        for post in chat:
+            values = [v for k, v in post["headers"] if k.lower() == "idempotency-key"]
+            assert len(values) == 1 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", values[0]), label
+            assert post["body"]["model"] == model and post["body"]["stream"] is True, label
+            assert post["body"]["stream_options"]["include_usage"] is True, label
         return chat, listed, marker, result, server.recorder
 
     def key(r):
@@ -118,7 +143,7 @@ def main():
 
     for model in MODEL_IDS:
         label = model.replace(":", "-")
-        chat, listed, marker, result, _ = capture(label, model)
+        chat, listed, marker, result, _ = capture(label, model, check_cache=model == MODEL_IDS[0])
         assert [r["response_mode"] for r in chat] == ["main_read", "main_final"], label
         assert marker not in chat[0]["raw_body"] and marker in result.stdout, label
         assert any(m["role"] == "tool" and marker in str(m["content"]) for m in chat[1]["body"]["messages"]), label
@@ -165,19 +190,33 @@ def main():
                     assert chat[-1]["error_code"] == "mixture_already_running", label
                     receipt = chat[-1]["receipt"]
                     assert receipt["charge"] is None and receipt["held"] is None and receipt["status"] == "running", label
-                    assert receipt["request_id"] == chat[0]["run_id"] and receipt["request_id"] in result.stderr, label
+                    assert receipt["run_id"] == chat[0]["run_id"] and receipt["run_id"] in result.stderr, label
                     assert next(iter(recorder.runs.values()))["status"] == "running", label
-                    assert all(part in result.stderr for part in ("still running", "will be charged when it completes",
-                        "answer cannot be recovered", "starts and charges a second run")), label
+                    assert all(part in result.stderr for part in ("still running", "may be zero",
+                        "answer cannot be recovered", "separate, potentially billable run")), label
                 else:
                     assert chat[-1]["error_code"] == ("mixture_already_partial" if fault == "drop_partial" else "mixture_already_completed"), label
-                    assert "finished and was charged" in result.stderr and "Submitting again will charge again" in result.stderr, label
+                    assert "earlier request finished" in result.stderr and "US$0.01" in result.stderr, label
             summary["faults"][label] = {"http": [r["response_status"] for r in chat], "distinctKeys": len(set(keys)),
                 "codes": [r.get("error_code") for r in chat], "recordedRuns": len(recorder.runs),
-                "chargedFixtureRuns": sum(run["status"] in ("completed", "partial") for run in recorder.runs.values()),
+                "chargedFixtureRuns": sum((run["cents"] or 0) > 0 for run in recorder.runs.values()),
                 "exit": result.returncode, "contractViolations": 0}
             if fault == "drop_running":
                 summary["faults"][label]["receipt"] = {k: receipt[k] for k in ("status", "charge", "held")}
+    for layer in ("agent", "transport"):
+        config["retry"] = {"enabled": layer == "agent", "baseDelayMs": 10, "provider": {"maxRetries": int(layer == "transport")}}
+        settings.write_text(json.dumps(config))
+        for kind in ("paid", "unknown", "zero"):
+            name = "panel_failed_" + kind
+            label = layer + "-" + name
+            chat, _, marker, result, recorder = capture(label, "panel:panda", name, expect=0 if kind == "zero" else 1)
+            charges = [operation["cents"] for operation in recorder.runs.values()]
+            if kind == "zero":
+                assert len(chat) == 3 and len({key(r) for r in chat}) == 3 and marker in result.stdout, label
+            else:
+                assert len(chat) == 1 and charges == [3], label
+                assert ("US$0.03" if kind == "paid" else "amount is unknown") in result.stderr, label
+            summary["faults"][label] = {"posts": len(chat), "fixtureCents": charges, "exit": result.returncode}
     env.pop("PANDA_FIXTURE_CHANGE_REPLAY")
     summary["rootDialects"] = {}
     dialects = {"local-references": "", "2020-12": "https://json-schema.org/draft/2020-12/schema",
@@ -202,6 +241,35 @@ def main():
             assert len(chat) == 1 and chat[0]["response_mode"] == "refused" and chat[0]["param"].startswith("tools["), label
         if uri:
             summary["rootDialects"][label] = {"uri": uri, "chatPosts": len(chat), "exit": result.returncode}
+    summary["native"] = {}
+    modes = ["summary", "branch", "retired", "usage", "timeout", "malformed", "stream-error", "count", "format",
+             "logprobs", "zero", "unequal", "neutral", "history", "large", "malformed-pointer", "null-target",
+             "boolean-root", "prefix-and-items", "patterns-and-additional"]
+    for mode in modes:
+        target = "auto:quality" if mode == "usage" else "panel:panda" if mode == "timeout" else "glm-5.3"
+        fault = {"summary": "cut_200", "branch": "drop_completed"}.get(mode, mode)
+        chat, listed, _, _, recorder = capture("native-" + mode, target, fault, native=mode)
+        bodies = [r["body"] for r in chat]
+        if mode in ("summary", "branch"):
+            assert len(chat) == 3 and key(chat[0]) == key(chat[1]) != key(chat[2]), mode
+            assert chat[0]["raw_body"] == chat[1]["raw_body"] and len(recorder.runs) == 2, mode
+        elif mode == "retired":
+            assert len(chat) == 3 and not bodies[-1].get("tools")
+            assert any(m.get("tool_calls") for m in bodies[-1]["messages"]) and any(m["role"] == "tool" for m in bodies[-1]["messages"])
+        else:
+            assert len(chat) == 1, mode
+            body = bodies[0]
+            if mode == "history":
+                assert body["tools"] == [] and body["messages"][1]["reasoning_content"] == "Earlier thinking."
+            elif mode == "neutral":
+                assert body["store"] is False and body["max_tokens"] == 60000 and body["tools"] == []
+            elif mode == "large":
+                assert chat[0]["body_bytes"] > 65536 and "$ref" in chat[0]["raw_body"]
+            elif mode == "timeout":
+                assert dict((k.lower(), v) for k, v in chat[0]["headers"])["x-stainless-timeout"] == "15"
+        summary["native"][mode] = {"discovery": len(listed), "http": [r["response_status"] for r in chat],
+                                   "posts": len(chat), "keys": len({key(r) for r in chat}), "admissions": len(recorder.runs)}
+    summary["catalogPolicy"] = {"coldListGET": 0, "coldOfflinePromptGET": 0, "warmListGET": 0}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
 

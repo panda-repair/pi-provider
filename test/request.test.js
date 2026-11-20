@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { describeError } from "../src/errors.js";
 import { createRequestKeys, pandaStream } from "../src/request.js";
 
 const model = { provider: "panda", id: "glm-5.3", baseUrl: "http://127.0.0.1:8100/v1" };
@@ -24,6 +25,7 @@ test("failed logical requests retain their key, including when an extension chan
   const keys = createRequestKeys();
   const manager = fakeManager("session-one");
   keys.start(manager);
+  keys.start(fakeManager("second"));
   const invoke = pandaStream(fakeNative, keys, () => {});
   async function call(status, { session = "session-one", text = "hello", token = "pnd_it_a", transports = 1, target = model } = {}) {
     const headers = [];
@@ -59,7 +61,7 @@ test("failed logical requests retain their key, including when an extension chan
   await assert.rejects(call(200), /which failed request to retry/);
 });
 
-function retryHarness() {
+function retryHarness(selected = model) {
   const manager = fakeManager("session");
   const keys = createRequestKeys();
   keys.start(manager);
@@ -83,7 +85,7 @@ function retryHarness() {
   }, keys, () => {});
   return { sent, observed, async run(...responses) {
     let index = 0;
-    return invoke(model, responses, { apiKey: "pnd_it_fixture", sessionId: manager.getSessionId(),
+    return invoke(selected, responses, { apiKey: "pnd_it_fixture", sessionId: manager.getSessionId(),
       fetch: async (_url, init) => {
         sent.push(init.headers.get("idempotency-key"));
         const item = responses[index++];
@@ -99,13 +101,12 @@ test("HTTP outcomes choose identical keys in transport and whole-stream retries"
   const cases = [
     [null, true], [{ status: 200, cut: true }, true], [{ status: 500 }, true],
     ...["interrupted", "outcome_unknown", "mixture_store_unavailable", "inference_upstream_unavailable"].map(code => [{ status: 503, code }, true]),
-    ...["model_unavailable", "model_refused"].map(code => [{ status: 503, code }, false]),
-    ...["answer_invalid", "answer_incomplete", "no_answers"].map(code => [{ status: 502, code }, false]),
-    ...[400, 401, 403, 408, 429].map(status => [{ status, code: "definite" }, false]),
-    ...["mixture_already_failed", "mixture_idempotency_conflict"].map(code =>
-      [{ status: 409, code, headers: { "idempotency-replayed": "true" } }, false]),
+    ...["model_unavailable", "model_refused"].map(code => [bill(503,code,"failed",amount("0")), false]),
+    ...["answer_invalid", "answer_incomplete", "no_answers"].map(code => [bill(502,code,"failed",amount("0")), false]),
+    [{ status: 400, code: "unsupported_parameter" }, false],
+    [{ status: 429, code: "throttle_workspace_rate_limited" }, false],
     [{ status: 503, body: "gateway" }, true],
-    [{ status: 502, code: "unknown_server_code" }, true], [{ status: 409, body: "" }, false],
+    [{ status: 502, body: "unknown" }, true], [{ status: 409, body: "" }, true],
     [{ status: 409, body: "unreadable", headers: { "idempotency-replayed": "true" } }, true],
     [{ status: 409, body: JSON.stringify({ panda: { replay: true } }) }, true],
   ];
@@ -123,7 +124,7 @@ test("HTTP outcomes choose identical keys in transport and whole-stream retries"
 
 test("concurrent definite failures allow fresh attempts while ambiguous unknown failures block", async () => {
   const h = retryHarness();
-  await Promise.all([h.run({ status: 503, code: "model_unavailable" }), h.run({ status: 502, code: "no_answers" })]);
+  await Promise.all([h.run(bill(503,"model_unavailable","failed",amount("0"))), h.run(bill(502,"no_answers","failed",amount("0")))]);
   await h.run({ status: 200 });
   assert.equal(new Set(h.sent).size, 3);
   const unknown = retryHarness();
@@ -132,65 +133,10 @@ test("concurrent definite failures allow fresh attempts while ambiguous unknown 
   assert.equal(unknown.sent.length, 2);
 });
 
-test("completed and partial receipts stop both retry layers and retain bounded error details", async () => {
-  for (const status of ["completed", "partial"]) {
-    const h = retryHarness();
-    const code = "mixture_already_" + status;
-    const receipt = { error: { code, type: "invalid_request_error" }, panda: { status, charge: { minor_units: "1" } } };
-    await h.run(null, { status: 409, body: JSON.stringify(receipt), headers: {
-      "x-panda-request-id": "req_123", "idempotency-replayed": "true", "x-should-retry": "true" } }, { status: 200 });
-    await h.run({ status: 200 });
-    assert.equal(h.sent.length, 2);
-    assert.equal(h.sent[0], h.sent[1]);
-    assert.equal(h.observed.length, 3);
-    for (const response of h.observed) {
-      assert.equal(response.status, 409);
-      assert.equal(response.headers.get("x-should-retry"), "false");
-      assert.equal(response.headers.get("idempotency-replayed"), "true");
-      const body = JSON.parse(response.body);
-      assert.deepEqual(body.panda, receipt.panda);
-      assert.equal(body.error.code, code);
-      assert.match(body.error.message, /finished and was charged.*response was lost.*charge again.*req_123/);
-    }
-  }
-});
-
-test("a running replay returns the pending receipt locally on both transport and agent re-entry", async () => {
-  const h = retryHarness();
-  const code = "mixture_already_running";
-  const panda = { replay: true, status: "running", request_id: "req_pending", run_id: "run-pending", charge: null, held: null };
-  const running = { status: 409, headers: { "idempotency-replayed": "true", "x-should-retry": "true" },
-    body: JSON.stringify({ error: { type: "invalid_request_error", code }, panda }) };
-  await h.run(null, running, { status: 200 });
-  await h.run({ status: 200 });
-  assert.equal(h.sent.length, 2);
-  assert.equal(h.sent[0], h.sent[1]);
-  assert.equal(h.observed.length, 3);
-  for (const response of h.observed) {
-    assert.equal(response.status, 409);
-    assert.equal(response.headers.get("idempotency-replayed"), "true");
-    assert.equal(response.headers.get("x-should-retry"), "false");
-    const receipt = JSON.parse(response.body);
-    assert.deepEqual(receipt.panda, panda);
-    assert.equal(receipt.error.code, code);
-    assert.match(receipt.error.message, /identical request is still running.*will be charged when it completes.*answer cannot be recovered.*starts and charges a second run.*req_pending/is);
-  }
-});
-
-test("large or misleading error envelopes preserve the original response and the uncertain key", async () => {
-  const body = JSON.stringify({ error: { code: "model_unavailable", message: "x".repeat(32_768) } });
-  for (const headers of [{}, { "content-length": "20" }, { "content-length": "50000" }]) {
-    const h = retryHarness();
-    await h.run({ status: 503, body, headers });
-    await h.run({ status: 200 });
-    assert.equal(h.sent[0], h.sent[1]);
-    assert.equal(h.observed[0].body, body);
-  }
-});
-
-
 test("ADR 0079 receives the native payload and complete replacements from peer extensions", async () => {
-  const invoke = pandaStream(fakeNative, createRequestKeys(), () => {});
+  const keys = createRequestKeys();
+  keys.start(fakeManager("wire"));
+  const invoke = pandaStream(fakeNative, keys, () => {});
   const schema = { $schema: "https://json-schema.org/draft/2020-12/schema",
     $defs: { large: { description: "a".repeat(70_000) } }, properties: { name: { $ref: "#/$defs/large" } } };
   const native = { model: model.id, tools: [], tool_choice: "auto", messages: [
@@ -202,7 +148,7 @@ test("ADR 0079 receives the native payload and complete replacements from peer e
     metadata: { audit: "example" }, store: false, other_option: "requires-refusal" };
   for (const expected of [native, changed]) {
     let observed;
-    await invoke(model, { body: native }, { apiKey: "fixture",
+    await invoke(model, { body: native }, { apiKey: "fixture", sessionId: "wire",
       onPayload: expected === changed ? (original, actualModel) => {
         assert.equal(original, native);
         assert.equal(actualModel, model);
@@ -226,4 +172,118 @@ test("mismatched chat destinations and Authorization overrides cannot use the gr
     await assert.rejects(events.result(), /mismatched endpoint or credential/);
   }
   assert.equal(sent, 0);
+});
+
+const amount = minor_units => ({ schema_version: "panda.usd-amount.v1", currency: "USD", minor_units });
+const validId = "req_" + "1".repeat(32);
+function bill(status, code, settlement, charge) {
+  return { status, body: JSON.stringify({ error: { code, message: "DO_NOT_RECORD", metadata: { raw: "DO_NOT_RECORD" } },
+    panda: { version: "panda.chat.v1", status: settlement, request_id: validId, agents: ["DO_NOT_RECORD"],
+      charge, held: settlement === "running" ? null : amount("0") } }) };
+}
+
+test("Panel and routed failures stop both retry layers unless the settlement proves zero", async () => {
+  for (const id of ["glm-5.3", "panel:panda", "auto:quality"]) {
+    for (const charge of [amount("3"), undefined, { ...amount("0"), currency: "other" }, amount("00"), amount("0")]) {
+      for (const layer of ["agent", "provider"]) {
+        const h = retryHarness({ ...model, id });
+        const first = bill(502, "answer_invalid", "failed", charge);
+        if (layer === "agent") { await h.run(first); await h.run({ status: 200 }); }
+        else await h.run(first, { status: 200 });
+        if (charge?.minor_units === "0" && charge.currency === "USD") {
+          assert.equal(h.sent.length, 2);
+          assert.notEqual(...h.sent);
+        } else {
+          assert.equal(h.sent.length, 1);
+          assert.equal(h.observed[1].body, h.observed[0].body);
+          assert.doesNotMatch(h.observed[0].body, /DO_NOT_RECORD/);
+          assert.match(h.observed[0].body, charge?.minor_units === "3" ? /US\$0\.03/ : /amount is unknown/);
+        }
+      }
+    }
+  }
+});
+
+test("running, settled and conflicting receipts are safe and terminal at both layers", async () => {
+  for (const [code, state, charge, wording] of [
+    ["mixture_already_running","running",null,/still running.*may be zero/],
+    ["mixture_already_partial","partial",amount("3"),/US\$0\.03/],
+    ["mixture_already_completed","completed",amount("0"),/US\$0\.00/],
+    ["mixture_already_failed","failed",amount("5"),/US\$0\.05/],
+    ["mixture_idempotency_conflict","failed",amount("0"),/original settlement is unknown/],
+  ]) {
+    const h = retryHarness();
+    await h.run(null, bill(409,code,state,charge), { status: 200 });
+    const repeated = await h.run({ status: 200 });
+    assert.equal(h.sent.length,2);
+    assert.equal(h.sent[0],h.sent[1]);
+    assert.match(repeated.errorMessage,wording);
+    for (const res of h.observed) {
+      assert.equal(res.status,409);
+      assert.equal(res.headers.get("x-should-retry"),"false");
+      assert.doesNotMatch(res.body,/DO_NOT_RECORD/);
+      assert.equal(JSON.parse(res.body).error.code,code);
+    }
+  }
+});
+
+test("error redaction keeps only recognized parameters, status codes, amounts and identifiers", async () => {
+  const bad = "DO_NOT_RECORD";
+  const err = (code,param) => describeError(400, { error: { code,param,message:bad },
+    panda: {version:"panda.chat.v1", status:"failed", request_id:bad, run_id:bad, agents:[bad]} },
+    new Headers({"x-panda-request-id":bad,"x-other":bad}),model);
+  assert.match(err("context_length_exceeded","messages").message,/maximum context length/);
+  assert.equal(JSON.parse(err("unsupported_parameter","tools[1].function.parameters."+bad).body).error.param,"tools[1].function.parameters");
+  assert.equal(JSON.parse(err(bad,bad).body).error.param,null);
+  assert.doesNotMatch(err(bad,bad).body,/DO_NOT_RECORD/);
+  for (const headers of [{}, {"content-length":"2"}, {"content-length":"50000"}]) {
+    const h=retryHarness();
+    await h.run({status:503,body:bad.repeat(4000),headers});
+    await h.run({status:200});
+    assert.equal(h.sent[0],h.sent[1]);
+    assert.doesNotMatch(h.observed[0].body,/DO_NOT_RECORD/);
+  }
+});
+
+test("summary operation references isolate converging bodies, renew after success, and fail closed without identity", () => {
+  const keys=createRequestKeys(); const options={sessionId:"same-route",cacheRetention:"none",apiKey:"key"};
+  const context=()=>({messages:[{role:"user",content:"same",timestamp:1}]});
+  const a=context(), b=context();
+  const one=keys.reserve(options,a,model,"{}"), two=keys.reserve(options,b,model,"{}");
+  assert.notEqual(one.key,two.key);
+  one.finish("error"); two.finish("error");
+  const retry=keys.reserve(options,a,model,"different");
+  assert.equal(retry.key,one.key);
+  retry.finish("stop");
+  assert.notEqual(keys.reserve(options,a,model,"{}").key,one.key);
+  assert.equal(keys.reserve(options,b,model,"{}").key,two.key);
+  assert.throws(()=>keys.reserve({}, {},model,"{}"),/identify this operation/);
+});
+
+test("fresh attempts require a proved zero settlement or the documented pre-admission status and code", () => {
+  const action = (status, code, panda) => describeError(status, { error: { code }, panda }, new Headers(), model).action;
+  assert.equal(action(502, "answer_invalid"), "terminal");
+  for (const held of [undefined, null, amount("3"), {currency:"USD", minor_units:"0"}]) {
+    assert.equal(action(502, "answer_invalid", {version:"panda.chat.v1", status:"failed", charge:amount("0"), held}), "terminal");
+  }
+  assert.equal(action(500, "internal_error", { version:"panda.chat.v1", status:"partial", charge:null }), "terminal");
+  assert.equal(action(503, "unsupported_parameter"), "same");
+  assert.equal(action(400, "unsupported_parameter"), "fresh");
+  assert.equal(action(429, "throttle_workspace_rate_limited"), "fresh");
+});
+
+test("cache-disabled foreground retries use the projected entry even when Pi clones messages", () => {
+  const keys = createRequestKeys();
+  const user = { role: "user", content: "Keep this request.", timestamp: 1 };
+  const manager = { getSessionId: () => "foreground", buildSessionProjection: () => ({
+    entries: [{ messages: [user], sourceEntry: { id: "entry" } }],
+  }) };
+  const options = { sessionId: "foreground", cacheRetention: "none", apiKey: "fixture" };
+  keys.start(manager);
+  const first = keys.reserve(options, { messages: [structuredClone(user)] }, model, "{}");
+  first.finish("error");
+  const retry = keys.reserve(options, { messages: [structuredClone(user)] }, model, "{}");
+  assert.equal(retry.key, first.key);
+  const synthetic = { ...user, content: "Summarize the conversation." };
+  assert.notEqual(keys.reserve(options, { messages: [synthetic] }, model, "{}").key, retry.key);
 });

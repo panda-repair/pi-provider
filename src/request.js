@@ -1,137 +1,145 @@
 import { createHash, randomUUID } from "node:crypto";
+import { boundedJSON, describeError, errorResponse, observeStreamErrors } from "./errors.js";
+import { responseUsage } from "./usage.js";
 
-// An outer agent retry reopens the stream. Keep the last HTTP outcome alongside
-// its key so both the new stream and a retry within one stream make the same decision.
+const hash = text => createHash("sha256").update(text).digest("hex");
+
 export function createRequestKeys() {
-  const runs = new Map();
+  const foreground = new Map();
+  // Pi reuses the synthetic user message across native summary retries and creates
+  // another message for a new summary, even when its text, routing ID and signal repeat.
+  const standalone = new WeakMap();
   return {
-    start(manager) { runs.set(manager.getSessionId(), { manager, attempts: new Map() }); },
-    settle(manager) { runs.delete(manager.getSessionId()); },
-    reserve(sessionId, model, token, body) {
-      const run = runs.get(sessionId);
-      const last = run?.manager.buildSessionProjection().entries.findLast(entry => entry.messages.length);
-      if (!last || typeof body !== "string") return { key: randomUUID(), finish() {} };
-      const tokenHash = createHash("sha256").update(token).digest("hex");
-      const identity = JSON.stringify([last.sourceEntry.id, model.baseUrl, model.id, tokenHash]);
-      const group = run.attempts.get(identity) ?? new Set();
-      const bodyHash = createHash("sha256").update(body).digest("hex");
-      const failed = [...group].filter(attempt => attempt.failed);
-      const matching = failed.filter(attempt => attempt.bodyHash === bodyHash);
-      const candidates = matching.length ? matching : failed;
-      if (candidates.length > 1) {
-        throw new Error("Panda cannot identify which failed request to retry safely.");
+    start(manager) { foreground.set(manager.getSessionId(), { manager, attempts: new Map() }); },
+    settle(manager) { foreground.delete(manager.getSessionId()); },
+    reserve(options, context, model, body) {
+      const run = foreground.get(options.sessionId);
+      let groups;
+      let source;
+      const message = context.messages?.at(-1);
+      const entry = run?.manager.buildSessionProjection().entries.findLast(row => row.messages.length);
+      const projected = entry?.messages.at(-1);
+      // Foreground messages can be cloned by extensions. Native summary retries reuse
+      // their own synthetic message, independent of the foreground transcript.
+      const summary = run && options.cacheRetention === "none" && (!projected ||
+        message?.role !== projected.role || message?.timestamp !== projected.timestamp ||
+        JSON.stringify(message?.content) !== JSON.stringify(projected.content));
+      if ((!run || summary) && options.sessionId && message && typeof message === "object") {
+        groups = standalone.get(message) ?? new Map();
+        standalone.set(message, groups);
+        source = options.sessionId;
+      } else if (run) {
+        groups = run.attempts;
+        source = entry?.sourceEntry.id;
       }
-      const previous = candidates[0];
-      if (previous) group.delete(previous);
+      if (!groups || !source || typeof body !== "string") {
+        throw new Error("Panda could not identify this operation safely. No request was sent.");
+      }
+      const identity = JSON.stringify([source, model.baseUrl, model.id, hash(options.apiKey)]);
+      const group = groups.get(identity) ?? new Set();
+      const bodyHash = hash(body);
+      const failed = [...group].filter(ticket => ticket.failed);
+      const matching = failed.filter(ticket => ticket.bodyHash === bodyHash);
+      const previous = matching.length ? matching : failed;
+      if (previous.length > 1) throw new Error("Panda cannot identify which failed request to retry safely.");
+      const prior = previous[0];
+      if (prior) group.delete(prior);
       const ticket = {
-        key: previous?.key ?? randomUUID(), fresh: previous?.fresh, receipt: previous?.receipt,
-        bodyHash, failed: false,
+        key: prior?.key ?? randomUUID(), terminal: prior?.terminal, fresh: false, failed: false, bodyHash,
         finish(reason) {
           if (reason === "error" && !ticket.fresh) ticket.failed = true;
           else group.delete(ticket);
-          if (!group.size) run.attempts.delete(identity);
+          if (!group.size) groups.delete(identity);
         },
       };
       group.add(ticket);
-      run.attempts.set(identity, group);
+      groups.set(identity, group);
       return ticket;
     },
   };
 }
 
-// Inspect only the machine envelope. Canceling a tee branch can wait for the
-// SDK's untouched branch; never await that cancellation here.
-async function boundedError(response) {
-  const limit = 16_384;
-  if (!response.body || response.bodyUsed || response.body.locked || Number(response.headers.get("content-length")) > limit) return;
-  const reader = response.clone().body.getReader();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    void reader.cancel().catch(() => {});
-  }, 1000);
-  const decoder = new TextDecoder();
-  let text = "";
-  let bytes = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (timedOut) return;
-      if (done) return JSON.parse(text + decoder.decode());
-      bytes += value.byteLength;
-      if (bytes > limit) return;
-      text += decoder.decode(value, { stream: true });
-    }
-  } catch {
-    return;
-  } finally {
-    clearTimeout(timer);
-    void reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
+function safeMessage(model, original, text) {
+  return { role: "assistant", content: [], api: model.api, model: model.id, provider: "panda",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    timestamp: Date.now(), stopReason: original?.stopReason === "aborted" ? "aborted" : "error", errorMessage: text };
 }
 
-function receiptResponse(receipt) {
-  return new Response(receipt.body, { status: 409, headers: receipt.headers });
-}
-
-async function classifyResponse(attempt, response) {
-  const { status, headers } = response;
-  // Until the native parser finishes, a 200 can still be an interrupted SSE stream.
-  // A dropped connection, HTTP 500 or unfamiliar server failure can also have run.
-  if (status >= 400 && status < 500 && status !== 409) attempt.fresh = true;
-  if (status !== 409 && status !== 502 && status !== 503) return response;
-  const data = await boundedError(response);
-  const code = data?.error?.code;
-  if (status === 409 && ["mixture_already_running", "mixture_already_completed", "mixture_already_partial"].includes(code)) {
-    const requestId = headers.get("x-panda-request-id") ?? data.panda?.request_id;
-    const id = typeof requestId === "string" && /^[a-zA-Z0-9_.:/-]{1,128}$/.test(requestId) ? requestId : undefined;
-    const explanation = code === "mixture_already_running"
-      ? "The earlier identical request is still running and will be charged when it completes. Its answer cannot be recovered. Resubmitting starts and charges a second run."
-      : "The earlier Panda request finished and was charged. Its response was lost. Submitting again will charge again.";
-    const message = explanation + (id ? " Panda request ID: " + id + "." : "");
-    const safeHeaders = new Headers(headers);
-    for (const name of ["content-length", "content-encoding", "transfer-encoding"]) safeHeaders.delete(name);
-    safeHeaders.set("content-type", "application/json");
-    safeHeaders.set("x-should-retry", "false");
-    attempt.receipt = { body: JSON.stringify({ ...data, error: { ...data.error, message } }), headers: safeHeaders };
-    void response.body?.cancel().catch(() => {});
-    return receiptResponse(attempt.receipt);
-  }
-  // A plain 409 is definite. If Panda explicitly marks a replay and the bounded
-  // envelope cannot identify its outcome, keep the key so an original charge survives.
-  const markedReplay = headers.get("idempotency-replayed")?.toLowerCase() === "true" || data?.panda?.replay === true;
-  const definiteReplay = ["mixture_already_failed", "mixture_idempotency_conflict"].includes(code);
-  attempt.fresh = (status === 409 && (!markedReplay || definiteReplay)) ||
-    (status === 502 && ["answer_invalid", "answer_incomplete", "no_answers"].includes(code)) ||
-    (status === 503 && ["model_unavailable", "model_refused"].includes(code));
-  return response;
-}
-
-export function pandaStream(stream, keys, assertAvailable) {
+export function pandaStream(stream, keys, assertAvailable, observe) {
   return (model, context, options = {}) => {
     assertAvailable(model, options.apiKey);
     let attempt;
+    let failure;
+    const usage = responseUsage(model);
     const send = options.fetch ?? globalThis.fetch;
+    function record(error) {
+      failure = error.message;
+      attempt.fresh = error.action === "fresh";
+      if (error.action === "terminal") attempt.terminal = error;
+      return error;
+    }
     const events = stream(model, context, {
       ...options,
+      ...(options.timeoutMs === undefined && (model.id.startsWith("panel:") || ["auto", "auto:quality"].includes(model.id))
+        && { timeoutMs: 600_000 }),
+      async onProviderStreamEvent(chunk, target) {
+        usage.chunk(chunk);
+        await options.onProviderStreamEvent?.(chunk, target);
+      },
       async fetch(input, init) {
         const target = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
         const headers = new Headers(init?.headers ?? input?.headers);
         if (target !== model.baseUrl.replace(/\/+$/, "") + "/chat/completions" ||
             headers.get("authorization") !== "Bearer " + options.apiKey) {
-          throw new Error("Panda refused a request with a mismatched endpoint or credential.");
+          failure = "Panda refused a request with a mismatched endpoint or credential.";
+          throw new Error(failure);
         }
-        attempt ??= keys.reserve(options.sessionId, model, options.apiKey, init?.body);
-        if (attempt.receipt) return receiptResponse(attempt.receipt);
+        if (!attempt) {
+          try { attempt = keys.reserve(options, context, model, init?.body); }
+          catch (error) { failure = error.message; throw error; }
+        }
+        if (attempt.terminal) { failure = attempt.terminal.message; return errorResponse(attempt.terminal); }
         if (attempt.fresh) attempt.key = randomUUID();
         attempt.fresh = false;
+        failure = undefined;
+        usage.request(init?.body);
         headers.set("Idempotency-Key", attempt.key);
-        const response = await send(input, { ...init, headers, redirect: "error" });
-        return classifyResponse(attempt, response);
+        let response;
+        try {
+          response = await send(input, { ...init, headers, redirect: "manual" });
+        } catch {
+          failure = "Panda connection error before a complete response.";
+          throw new Error(failure);
+        }
+        if (response.redirected || (response.status >= 300 && response.status < 400) ||
+            (response.url && response.url !== target)) {
+          void response.body?.cancel().catch(() => {});
+          const message = "Panda refused an unexpected response endpoint or redirect.";
+          return errorResponse(record({ action: "terminal", status: 400, message,
+            body: JSON.stringify({ error: { message } }), headers: { "content-type": "application/json", "x-should-retry": "false" } }));
+        }
+        if (response.ok) return observeStreamErrors(response, data => {
+          // HTTP 200 already began. A stream error without a validated settlement may have run.
+          record(describeError(500, data, response.headers));
+        });
+        const data = await boundedJSON(response);
+        void response.body?.cancel().catch(() => {});
+        return errorResponse(record(describeError(response.status, data, response.headers)));
       },
     });
-    void events.result().then(message => attempt?.finish(message.stopReason), () => attempt?.finish("error"));
-    return events;
+    function finish(message) {
+      attempt?.finish(message.stopReason);
+      if (message.stopReason === "error" || message.stopReason === "aborted") {
+        return safeMessage(model, message, failure ?? (message.stopReason === "aborted"
+          ? "Panda request aborted." : "Panda connection error before a complete response."));
+      }
+      return usage.finish(message);
+    }
+    // The native event stream is consumed by Pi once. Transform its final event before
+    // either the transcript consumer or .result() receives it.
+    if (observe) return observe(events, finish);
+    const result = events.result().then(finish, error => { attempt?.finish("error"); throw error; });
+    return { result: () => result };
   };
 }

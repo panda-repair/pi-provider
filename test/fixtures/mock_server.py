@@ -43,18 +43,28 @@ class Recorder:
             if key is not None and key in self.runs:
                 run = self.runs[key]
                 return ("replay" if run["request"] == request else "conflict"), dict(run)
-            fault = scenario if self.chat_count == 1 else None
+            faults = {"prehold", "definite", "definite_proxy", "drop_running", "drop_completed",
+                      "drop_partial", "cut_200", "unknown", "panel_failed_paid", "panel_failed_unknown", "panel_failed_zero"}
+            fault = scenario if self.chat_count == 1 and scenario in faults else None
             if fault == "prehold":
                 return fault, None
             status = {"definite": "failed", "definite_proxy": "failed", "drop_partial": "partial",
                       "drop_running": "running"}.get(fault, "completed" if fault else "running")
-            run = {"request": request, "id": "req_fixture_" + str(len(self.runs) + 1), "status": status}
+            number = f"{len(self.runs) + 1:032x}"
+            if fault and fault.startswith("panel_failed_"):
+                status = "failed"
+            cents = None if status == "running" else 0 if status == "failed" else 1
+            if fault in ("panel_failed_paid", "panel_failed_unknown"):
+                cents = 3
+            run = {"request": request, "id": "run-" + number, "request_id": "req_" + number,
+                   "status": status, "cents": cents}
             self.runs[key if key is not None else object()] = run
             return fault or "normal", run
 
     def settle(self, run, status):
         with self.lock:
             run["status"] = status
+            run["cents"] = 0 if status == "failed" else 1
 
     def start(self, handler):
         with self.lock:
@@ -138,6 +148,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
         self.close_connection = True
 
+    @staticmethod
+    def settlement(run, replay=False):
+        amount = lambda cents: {"schema_version": "panda.usd-amount.v1", "currency": "USD", "minor_units": str(cents)}
+        return {"version": "panda.chat.v1", "replay": replay, "request_id": run["request_id"], "run_id": run["id"],
+                "status": run["status"], "charge": None if run["cents"] is None else amount(run["cents"]),
+                "held": None if run["status"] == "running" else amount(0)}
+
     def fault(self, action, run, record):
         response_headers = {}
         receipt = None
@@ -163,16 +180,18 @@ class Handler(BaseHTTPRequestHandler):
         if action == "replay":
             status, code = 409, "mixture_already_" + run["status"]
             response_headers.update({"Idempotency-Replayed": "true", "x-should-retry": "false"})
-            charge = {"schema_version": "panda.usd-amount.v1", "currency": "USD",
-                      "minor_units": "0" if run["status"] == "failed" else "1"}
-            receipt = {"version": "panda.chat.v1", "replay": True, "request_id": run["id"],
-                       "status": run["status"], "charge": None if run["status"] == "running" else charge}
-            if run["status"] == "running":
-                receipt["held"] = None
+            receipt = self.settlement(run, replay=True)
+        elif action.startswith("panel_failed_"):
+            status, code = 502, "answer_invalid"
+            receipt = self.settlement(run)
+            if action == "panel_failed_unknown":
+                del receipt["charge"]
         else:
             status, code = {"prehold": (429, "throttle_workspace_rate_limited"), "definite": (503, "model_unavailable"),
                             "definite_proxy": (503, "model_unavailable"),
                             "unknown": (503, "outcome_unknown"), "conflict": (409, "mixture_idempotency_conflict")}[action]
+            if action in ("definite", "definite_proxy"):
+                receipt = self.settlement(run)
             if action == "prehold":
                 response_headers["Retry-After"] = "0"
             elif action != "definite_proxy":
@@ -209,7 +228,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(raw_text) if raw_text else None
             except ValueError:
                 body = None
-            record.update(body=body, raw_body=raw_text, body_bytes=len(raw))
+            record.update(body=body, raw_body=raw_text, body_bytes=len(raw),
+                          fixture_bearer_verified=self.headers.get("Authorization") == "Bearer " + state.expected_token)
             route = urlsplit(self.path).path
             status, content_type = 200, "application/json"
             if self.command == "GET" and route == "/v1/models":
@@ -233,6 +253,9 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(state.hold)
                 base = {"id": "chatcmpl-local-%d" % record["id"], "created": int(time.time()), "model": body.get("model", "")}
                 usage = {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
+                mode = getattr(state, "scenario", None)
+                if mode == "usage":
+                    usage = {"prompt_tokens": 310000, "completion_tokens": 45, "total_tokens": 310045}
                 if body.get("stream"):
                     content_type = "text/event-stream"
                     base["object"] = "chat.completion.chunk"
@@ -241,10 +264,21 @@ class Handler(BaseHTTPRequestHandler):
                     choices = [{"index": 0, "delta": d, "finish_reason": end} for d, end in
                                [({"role": "assistant"}, None), (delta, None), ({}, reason)]]
                     chunks = [dict(base, choices=[c]) for c in choices]
+                    if mode == "usage":
+                        def call(tokens):
+                            return {"usage": {"input_tokens": tokens, "output_tokens": 15, "cached_input_tokens": 1200}}
+                        chunks[-1]["panda"] = {"mode": "panel", "agents": [call(75000), call(75000)],
+                            "synthesis": call(160000), "charge": {"schema_version": "panda.usd-amount.v1",
+                            "currency": "USD", "minor_units": "13"}}
                     if (body.get("stream_options") or {}).get("include_usage"):
                         chunks.append(dict(base, choices=[], usage=usage))
                     payload = ("".join("data: " + compact(chunk) + "\n\n" for chunk in chunks) +
                                "data: [DONE]\n\n").encode("utf-8")
+                    if mode == "malformed":
+                        payload = b"data: {private-marker-invalid-json\n\n"
+                    elif mode == "stream-error":
+                        error = {"error": {"code": "answer_invalid", "message": "private-marker-server-error"}}
+                        payload = ("data: " + compact(error) + "\n\n").encode()
                 else:
                     base["object"] = "chat.completion"
                     msg = dict({"role": "assistant", "content": None}, **delta)
