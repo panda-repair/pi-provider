@@ -2,7 +2,7 @@ STATUS: complete
 
 # Panda provider for Pi 1.5.2
 
-`@panda-repair/pi-provider@0.1.0` is ready for release review under the approved MIT license. The Pi 1.5.2 registry returned the requested context window and output cap for every selector, and all seven completed a file-read turn. The root tool-schema dialects matched the pinned Zero implementation. The package is local and unpublished. Production admission and billing remain untested. [Setup](README.md) · [License](LICENSE) · [Recorded results](evidence/pi-1.5.2.json)
+`@panda-repair/pi-provider@0.1.0` is ready for release review under the approved MIT license. The seven Pi selectors use the context and output settings from Panda's coding-agent guide. Each completed a file-read turn. The package was built locally. Production admission and billing remain untested. [Setup](README.md) · [License](LICENSE) · [Recorded results](evidence/pi-1.5.2.json)
 
 ## What ships
 
@@ -12,7 +12,9 @@ The catalog retains developer messages and streaming usage. It disables storage,
 
 ### Context windows
 
-The catalog uses conservative Pi token estimates for Zero ADR 0079 D5/D7 at `92fe1a7c2e1923f902d5d30d1407cf13ba0bd38c`. GLM-5.3, DeepSeek V4.1 Flash and `auto:cost` use 262,144. Both built-in Panels and `auto` use 225,280. `auto:quality` uses 187,392. All seven keep 16,384 maximum output tokens. These are client planning values derived from the rendered-byte, synthesis and hold limits. Pi's automatic compaction uses the selected window and the user's reserve. Actual admission depends on the selected route and request. [Windows and default compaction](README.md)
+GLM-5.3, DeepSeek V4.1 Flash and `auto:cost` use 258,000 context tokens. Both Panels, `auto` and `auto:quality` use 224,000. Every selector allows 16,384 output tokens. The source is the coding-agent guide in webappv1 PR #97, revision `6ebf36eb81b836d3428fac1b2893915302877f94`. Its estimates use the smallest byte limit among the selector's tool-capable routes, divide by four and round down to the nearest thousand. [Panda coding-agent guide](https://panda.repair/products/llm-api/coding-agents)
+
+Zero ADR 0079 D5/D7 at `92fe1a7c` defines server admission. The request can include 65,536 bytes of system and developer text and 1,024 messages. Conversation capacity depends on the model, the tools sent, space for Panel synthesis and the hold cap. [API model limits](https://panda.repair/products/llm-api#llm-api-model-limits)
 
 ### Retries and charges
 
@@ -41,14 +43,15 @@ The checks used Pi CLI and Pi AI 1.5.2, OpenAI SDK 7.19.0, Node 24.21.0 and npm 
 | --- | --- |
 | Unit and syntax | `npm test` passed 19/19. Both `src/catalog.js` and `src/request.js` passed `node --check`. Tests cover all seven exact model windows and output caps, all 12 supported root URI spellings and 17 rejected markers. |
 | Checkout integration | 27 scenarios made 27 GETs and 52 POSTs with zero contract violations. Each of the seven models returned a marker first seen in a local file. Native custom tools completed turns with 2020-12, 2019-09 and draft-07, with the marker absent on both POSTs and annotation behavior preserved. Draft-04, draft-06 and a custom root each exited locally after discovery with zero chat POSTs. |
-| Installed catalog and compaction | The native registry returned the exact limits for all seven selectors. The CLI rounded the windows to `262.1K`, `225.3K` and `187.4K` and the output cap to `16.4K`. With Pi's default reserve, compaction begins above 245,760, 208,896 or 171,008 tokens for the three window sizes, respectively. |
-| Root-dialect comparison | All 28 cases agreed with Zero `92fe1a7c`. The packaged provider sent 12 supported root URI forms and an unmarked schema together in one normalized Chat POST. Draft-04, draft-06 and a nested marker reached no Chat POST. The independent run also passed 73 tests from the pinned Zero checkout. |
+| Public guide and installation syntax | All seven catalog and README rows matched the guide's computed values. Pi 1.5.2 parsed the guide's `npm:@panda-repair/pi-provider` as a scoped npm package. |
+| Installed catalog and compaction | The native registry returned all seven exact windows and output caps from a fresh archive install. The CLI displayed `258K` or `224K` and `16.4K` output. With Pi's default reserve, the compaction check stayed false at 241,616 and 207,616 tokens, respectively, and became true one token above each threshold. The probe made three authenticated fixture GETs. |
+| Root-dialect comparison on `714683e` | All 28 cases agreed with Zero `92fe1a7c`. The packaged provider sent 12 supported root URI forms and an unmarked schema together in one normalized Chat POST. Draft-04, draft-06 and a nested marker reached no Chat POST. The independent run also passed 73 tests from the pinned Zero checkout. |
 | Prior run still in progress | In both the agent-retry and transport-retry cases, two POSTs used the same key for one admitted fixture run. After the dropped response, the second POST returned `409 mixture_already_running`. Pi exited with the original request ID. The run was still pending with null charge and held amounts and no second admission. |
 | Independent running-replay checks on `02cdeef` | Nine scenarios passed. When the real agent was made to re-enter after the 409, `d4e5292` sent a third POST with a fresh key and admitted a second run. The fixed package returned the cached receipt twice locally. Its one admitted run was still pending. |
 | Definite 503 and lost reply | With `model_unavailable`, three POSTs used three keys for the refusal, successful retry and tool follow-up. The fixture recorded two answered runs. With a committed run and dropped connection, two POSTs shared one key for one charged fixture run. The second returned completed or partial 409, then Pi stopped. |
 | Independent wire and failure checks on `d4e5292` | All 40 Pi scenarios passed. The original checker accepted 124 requests, 40 GETs and 84 POSTs. Checks included both native retry paths, client timeout versus HTTP 408, cut 200 streams, oversized or delayed error bodies, unmarked 409s, marked unreadable replays, and local tool-reference errors. |
 | Reference comparison on `d4e5292` | All 104 effective admission decisions agreed with Zero slice B. Normalization matched directly on 101. Three schemas were rejected earlier by the extension and also refused by Zero before dispatch. Inputs were preserved and both inline/reference pairs matched. |
-| Package | `npm pack --dry-run --json` and an actual pack listed seven files including the MIT license, 11,052 bytes compressed and 29,694 bytes unpacked. Five scenarios from a fresh archive installation made eight requests with zero checker violations. Archive SHA-256 `c5c1477b35639721c3df3c61524ebde46beb460397da85894db26f344ea7f788`. |
+| Package | `npm pack --dry-run --json` and an actual pack listed seven files including the MIT license, 11,051 bytes compressed and 29,911 bytes unpacked. Archive SHA-256 `542a7c457c95acd1c4270ffa3a178c165a29487cd6274fed67545367518899a4`. |
 
 The portable evidence records error codes, admissions, simulated charges, grouped request keys, schema comparison counts and file hashes. The single-account fixture supports unkeyed calls, running and settled replays, and changed-request conflicts. It excludes `seed` and `user` from its request comparison and retains raw captures locally. [Evidence](evidence/pi-1.5.2.json) · [Integration runner](test/e2e.py) · [Test fixtures](test/fixtures)
 
@@ -62,7 +65,7 @@ python3 -I -B test/e2e.py --pi /path/to/pi --output /path/to/new-evidence
 
 ## Release decisions
 
-- Recheck the per-selector context estimates and production admission behavior at publication. The target branch, native Pi catalog and local wire checks are the evidence for this revision. [Model definitions](src/catalog.js)
+- Recheck production admission and the two public guide links at publication. The coordinator's pre-release check found the coding-agent page returned HTTP 404 and the main API page lacked the model-limits anchor. Both targets are present in PR #97. [Model definitions](src/catalog.js)
 - Confirm the price ceilings against the released catalog. The named-model input, output, cache-read and cache-write rates come from Zero `cb676cac`, `advisor_pricing.py` and the commercial catalog. Customer-facing examples agree on the two ordinary rates in the web app snapshot `10b870a6`. The five routed selectors use Pi's numeric zero placeholders. Panda's actual settlements can differ from Pi's estimate. [Panda pricing](https://panda.repair/pricing#pricing-llm-api)
 
 ## First public release

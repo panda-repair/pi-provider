@@ -506,21 +506,20 @@
     ],
     "sourceSha256": {
       "LICENSE": "61f97aef30fe1f6f67e3fa62269c9889bb029e7452c5ea796512a27e38f069d4",
-      "README.md": "c8d30997569025baf087e9ff591804a7b6d89701837e6fad75e1ec0cff3735d2",
+      "README.md": "eb6600c026de10f4c733550eea1ea99ca510b99e955b937f01d4df798ef93320",
       "index.js": "290c442c5571b7c53486a88ad20f61db1f946806d721ec00f8a764aa591792fa",
       "package.json": "ef8157232eec3d909ffef40eff54ddea605d02cf0b3b6f8e3770c1f4bdbdecc2",
-      "src/catalog.js": "66e9a7d1101a8c0cc194f69fc78303a2cf7a3a25ead05cb794ba379b549fa015",
+      "src/catalog.js": "dce047673f3db3fe076a0fdff7d8635c77e064803b262ea22a37fe080c95bdb4",
       "src/provider.js": "4c0192191b7d7ee67ced29897ac0b6d4de447d5d7d33c93db04908cbb8e792eb",
       "src/request.js": "269c35544336e1e97668d178f66256fd474def8e88b565154a72215a5039d125"
     },
-    "archiveSha256": "c5c1477b35639721c3df3c61524ebde46beb460397da85894db26f344ea7f788",
-    "packedBytes": 11052,
-    "unpackedBytes": 29694,
-    "freshInstallScenarios": 5,
-    "freshInstallRequests": 8,
-    "freshInstallContractViolations": 0,
+    "archiveSha256": "542a7c457c95acd1c4270ffa3a178c165a29487cd6274fed67545367518899a4",
+    "packedBytes": 11051,
+    "unpackedBytes": 29911,
     "licenseHolder": "Copyright (c) 2026 panda-repair",
-    "standardMitTermsMatched": true
+    "standardMitTermsMatched": true,
+    "freshInstallCatalogGETs": 3,
+    "freshInstallChatPOSTs": 0
   },
   "runningReplayComparison": {
     "priorRevision": "d4e5292",
@@ -549,32 +548,43 @@
     "currentScenarios": 9,
     "sourcePackageRevision": "02cdeef"
   },
-  "catalogAndRootDialectRevision": "92fe1a7c2e1923f902d5d30d1407cf13ba0bd38c",
   "contextWindows": {
-    "glm-5.3": 262144,
-    "deepseek-v4.1-flash": 262144,
-    "auto": 225280,
-    "auto:cost": 262144,
-    "auto:quality": 187392,
-    "panel:panda": 225280,
-    "panel:panda-quality": 225280
+    "glm-5.3": 258000,
+    "deepseek-v4.1-flash": 258000,
+    "auto": 224000,
+    "auto:cost": 258000,
+    "auto:quality": 224000,
+    "panel:panda": 224000,
+    "panel:panda-quality": 224000
   },
   "maxOutputTokens": 16384,
-  "catalogAndRootDialectVerification": {
-    "baselinePackageRevision": "02cdeef",
-    "baselineContextWindowForAllSelectors": 32768,
-    "otherModelMetadataIdentical": true,
-    "piDefaultCompactionReserveTokens": 16384,
-    "defaultCompactAboveTokensByWindow": {
-      "262144": 245760,
-      "225280": 208896,
-      "187392": 171008
-    },
+  "rootDialectComparisonOn714683e": {
     "rootSchemaComparisons": 28,
     "matchingZeroAdmissions": 13,
     "matchingZeroRefusals": 15,
     "normalizedToolsInOneChatPost": 13,
     "chatPostsForRejectedDraft04Draft06OrNestedMarker": 0,
     "passedPinnedZeroTests": 73
+  },
+  "admissionAndRootDialectRevision": "92fe1a7c2e1923f902d5d30d1407cf13ba0bd38c",
+  "codingAgentGuideRevision": "6ebf36eb81b836d3428fac1b2893915302877f94",
+  "codingAgentGuideVerification": {
+    "baselinePackageRevision": "714683e",
+    "matchingGuideAndRegistrySelectors": 7,
+    "otherRegistryMetadataIdentical": true,
+    "piDefaultCompactionReserveTokens": 16384,
+    "defaultCompactAboveTokensByWindow": {
+      "258000": 241616,
+      "224000": 207616
+    },
+    "cliWindows": [
+      "258K",
+      "224K"
+    ],
+    "cliMaxOutput": "16.4K",
+    "installCommand": "pi install npm:@panda-repair/pi-provider",
+    "sourceParsedByPi": "npm",
+    "systemAndDeveloperBytes": 65536,
+    "maxMessages": 1024
   }
 }
