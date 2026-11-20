@@ -9,7 +9,8 @@ import re
 import subprocess
 import sys
 import threading
-from http.server import ThreadingHTTPServer
+from contextlib import contextmanager, nullcontext
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,32 @@ def module_from(path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@contextmanager
+def unused_endpoint():
+    """Count requests to the endpoint that Pi's provider override supersedes."""
+    class Sink(BaseHTTPRequestHandler):
+        def record(self):
+            self.server.contacts += 1
+            self.send_response(403)
+            self.end_headers()
+
+        do_GET = do_POST = record
+
+        def log_message(self, *args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Sink) as server:
+        server.contacts = 0
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            yield server
+        finally:
+            server.shutdown()
+            thread.join()
+        assert server.contacts == 0, "The superseded endpoint received a request."
 
 
 def check_fixture_ledger(mock):
@@ -89,7 +116,8 @@ def main():
         fixture = work / "capture-fixture.txt"
         marker = "PANDA_READ_" + secrets.token_hex(12)
         fixture.write_text(marker + "\n")
-        with ThreadingHTTPServer(("127.0.0.1", 0), mock.Handler) as server:
+        with (ThreadingHTTPServer(("127.0.0.1", 0), mock.Handler) as server,
+              (unused_endpoint() if check_cache else nullcontext()) as decoy):
             server.expected_token = env["PANDA_API_TOKEN"]
             server.refusal = admission.refusal
             server.fixture = fixture
@@ -102,6 +130,10 @@ def main():
                 env["PANDA_BASE_URL"] = f"http://127.0.0.1:{server.server_port}/v1"
                 extra = ["-e", str(ROOT / "test/fixtures/referenced-tool.mjs")] if extension else []
                 if check_cache:
+                    models_file = Path(env["PI_CODING_AGENT_DIR"]) / "models.json"
+                    override = {"baseUrl": env["PANDA_BASE_URL"]}
+                    models_file.write_text(json.dumps({"providers": {"panda": override}}))
+                    env["PANDA_BASE_URL"] = f"http://127.0.0.1:{decoy.server_port}/v1"
                     cold = run(["--list-models", "panda"], label + "-cold")
                     assert "glm-5.3" not in cold.stdout and server.recorder.next_id == 1
                     env["PI_OFFLINE"] = "1"
@@ -119,6 +151,18 @@ def main():
                     warm = run(["--list-models", "panda"], label + "-warm")
                     assert all(model_id in warm.stdout for model_id in MODEL_IDS)
                     assert server.recorder.next_id == count
+                    config_model = {"id": model, "name": "Configured test model", "input": ["text"],
+                                    "reasoning": False, "contextWindow": 258000, "maxTokens": 16384,
+                                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}
+                    for api in ("openai-completions", "openai-responses"):
+                        override["api"] = api
+                        override["models"] = [dict(config_model, baseUrl=env["PANDA_BASE_URL"])]
+                        models_file.write_text(json.dumps({"providers": {"panda": override}}))
+                        refused = run(["-p", "--no-session", "--model", "panda/" + model, "Hello"],
+                                      label + "-" + api, expect=1)
+                        assert "configured provider endpoint" in refused.stderr
+                    assert server.recorder.next_id == count
+                    models_file.unlink()
             finally:
                 server.shutdown()
                 thread.join()
@@ -269,7 +313,8 @@ def main():
                 assert dict((k.lower(), v) for k, v in chat[0]["headers"])["x-stainless-timeout"] == "15"
         summary["native"][mode] = {"discovery": len(listed), "http": [r["response_status"] for r in chat],
                                    "posts": len(chat), "keys": len({key(r) for r in chat}), "admissions": len(recorder.runs)}
-    summary["catalogPolicy"] = {"coldListGET": 0, "coldOfflinePromptGET": 0, "warmListGET": 0}
+    summary["catalogPolicy"] = {"coldListGET": 0, "coldOfflinePromptGET": 0, "warmListGET": 0, "supersededEndpointContacts": 0,
+                                "incompatibleModelOverridePosts": 0}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
 

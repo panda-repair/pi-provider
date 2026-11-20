@@ -1,7 +1,13 @@
 {
-  "captureCheckerContractRevision": "cb676cac",
-  "localReferenceImplementationRevision": "beea6489f393d24bb08c602c4cc6e8eee0b5834b",
+  "date": "2026-11-20",
+  "runtimeRevision": "a919f15",
+  "baseline": "225cbd1",
   "package": "@panda-repair/pi-provider@0.1.0",
+  "scope": "Installed Pi, isolated configuration, synthetic credentials and local transports",
+  "sources": {
+    "serverContract": "153bfde8a901bbaf65149ec4228473bce1024a61",
+    "codingAgentGuide": "26b1214ffe5ee975b8abc72e8335545964a64004"
+  },
   "versions": {
     "pi_cli": "1.5.2",
     "pi_ai": "1.5.2",
@@ -10,581 +16,202 @@
     "node": "v24.21.0",
     "npm": "11.19.0"
   },
-  "scope": "Loopback-only macOS sandbox. Synthetic model results, inference tokens, run admissions and charges.",
-  "repoIntegration": {
-    "scenarios": 27,
-    "getModels": 27,
-    "chatPosts": 52,
-    "contractViolations": 0,
-    "models": {
-      "glm-5.3": {
-        "discovery": 1,
-        "chat": 2,
-        "contractViolations": 0,
-        "markerInToolResultAndFinalOutput": true
-      },
-      "deepseek-v4.1-flash": {
-        "discovery": 1,
-        "chat": 2,
-        "contractViolations": 0,
-        "markerInToolResultAndFinalOutput": true
-      },
-      "auto": {
-        "discovery": 1,
-        "chat": 2,
-        "contractViolations": 0,
-        "markerInToolResultAndFinalOutput": true
-      },
-      "auto:cost": {
-        "discovery": 1,
-        "chat": 2,
-        "contractViolations": 0,
-        "markerInToolResultAndFinalOutput": true
-      },
-      "auto:quality": {
-        "discovery": 1,
-        "chat": 2,
-        "contractViolations": 0,
-        "markerInToolResultAndFinalOutput": true
-      },
-      "panel:panda": {
-        "discovery": 1,
-        "chat": 2,
-        "contractViolations": 0,
-        "markerInToolResultAndFinalOutput": true
-      },
-      "panel:panda-quality": {
-        "discovery": 1,
-        "chat": 2,
-        "contractViolations": 0,
-        "markerInToolResultAndFinalOutput": true
-      }
+  "catalog": {
+    "glm-5.3": {
+      "input": 258000,
+      "output": 16384,
+      "compactAbove": 241616
     },
-    "retryCases": {
-      "agent-definite": {
-        "http": [
-          503,
-          200,
-          200
-        ],
-        "distinctKeys": 3,
-        "codes": [
-          "model_unavailable",
-          null,
-          null
-        ],
-        "recordedRuns": 3,
-        "chargedFixtureRuns": 2,
-        "exit": 0,
-        "contractViolations": 0
-      },
-      "agent-prehold": {
-        "http": [
-          429,
-          200,
-          200
-        ],
-        "distinctKeys": 3,
-        "codes": [
-          "throttle_workspace_rate_limited",
-          null,
-          null
-        ],
-        "recordedRuns": 2,
-        "chargedFixtureRuns": 2,
-        "exit": 0,
-        "contractViolations": 0
-      },
-      "agent-drop_running": {
-        "http": [
-          null,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          null,
-          "mixture_already_running"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 0,
-        "exit": 1,
-        "contractViolations": 0,
-        "receipt": {
-          "status": "running",
-          "charge": null,
-          "held": null
-        }
-      },
-      "agent-drop_completed": {
-        "http": [
-          null,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          null,
-          "mixture_already_completed"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 1,
-        "exit": 1,
-        "contractViolations": 0
-      },
-      "agent-drop_partial": {
-        "http": [
-          null,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          null,
-          "mixture_already_partial"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 1,
-        "exit": 1,
-        "contractViolations": 0
-      },
-      "agent-unknown": {
-        "http": [
-          503,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          "outcome_unknown",
-          "mixture_already_completed"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 1,
-        "exit": 1,
-        "contractViolations": 0
-      },
-      "agent-cut_200": {
-        "http": [
-          200,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          null,
-          "mixture_already_completed"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 1,
-        "exit": 1,
-        "contractViolations": 0
-      },
-      "agent-changed_body": {
-        "http": [
-          null,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          null,
-          "mixture_idempotency_conflict"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 1,
-        "exit": 1,
-        "contractViolations": 0
-      },
-      "transport-definite": {
-        "http": [
-          503,
-          200,
-          200
-        ],
-        "distinctKeys": 3,
-        "codes": [
-          "model_unavailable",
-          null,
-          null
-        ],
-        "recordedRuns": 3,
-        "chargedFixtureRuns": 2,
-        "exit": 0,
-        "contractViolations": 0
-      },
-      "transport-prehold": {
-        "http": [
-          429,
-          200,
-          200
-        ],
-        "distinctKeys": 3,
-        "codes": [
-          "throttle_workspace_rate_limited",
-          null,
-          null
-        ],
-        "recordedRuns": 2,
-        "chargedFixtureRuns": 2,
-        "exit": 0,
-        "contractViolations": 0
-      },
-      "transport-drop_running": {
-        "http": [
-          null,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          null,
-          "mixture_already_running"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 0,
-        "exit": 1,
-        "contractViolations": 0,
-        "receipt": {
-          "status": "running",
-          "charge": null,
-          "held": null
-        }
-      },
-      "transport-drop_completed": {
-        "http": [
-          null,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          null,
-          "mixture_already_completed"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 1,
-        "exit": 1,
-        "contractViolations": 0
-      },
-      "transport-drop_partial": {
-        "http": [
-          null,
-          409
-        ],
-        "distinctKeys": 1,
-        "codes": [
-          null,
-          "mixture_already_partial"
-        ],
-        "recordedRuns": 1,
-        "chargedFixtureRuns": 1,
-        "exit": 1,
-        "contractViolations": 0
-      }
+    "deepseek-v4.1-flash": {
+      "input": 258000,
+      "output": 16384,
+      "compactAbove": 241616
     },
-    "localReferences": {
-      "tool": "panda_fixture_read",
-      "wireParameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "Local fixture path"
-          }
-        },
-        "required": [
-          "path"
-        ]
-      },
-      "markerRoundTrip": true
+    "auto": {
+      "input": 224000,
+      "output": 16384,
+      "compactAbove": 207616
     },
-    "mockLedger": {
-      "unkeyedRequestsIndependent": true,
-      "pendingReplay": true,
-      "ignoredFields": [
-        "seed",
-        "user"
-      ],
-      "changedTemperatureConflict": true,
-      "settledReplay": true
+    "auto:cost": {
+      "input": 258000,
+      "output": 16384,
+      "compactAbove": 241616
     },
-    "rootDialects": {
-      "2020-12": {
-        "uri": "https://json-schema.org/draft/2020-12/schema",
-        "chatPosts": 2,
-        "exit": 0
-      },
-      "2019-09": {
-        "uri": "http://json-schema.org/draft/2019-09/schema#",
-        "chatPosts": 2,
-        "exit": 0
-      },
-      "draft-07": {
-        "uri": "http://json-schema.org/draft-07/schema#",
-        "chatPosts": 2,
-        "exit": 0
-      },
-      "draft-04": {
-        "uri": "http://json-schema.org/draft-04/schema#",
-        "chatPosts": 0,
-        "exit": 1
-      },
-      "draft-06": {
-        "uri": "https://json-schema.org/draft-06/schema",
-        "chatPosts": 0,
-        "exit": 1
-      },
-      "custom": {
-        "uri": "urn:fixture:unsupported",
-        "chatPosts": 0,
-        "exit": 1
-      }
+    "auto:quality": {
+      "input": 187000,
+      "output": 16384,
+      "compactAbove": 170616
+    },
+    "panel:panda": {
+      "input": 224000,
+      "output": 16384,
+      "compactAbove": 207616
+    },
+    "panel:panda-quality": {
+      "input": 224000,
+      "output": 16384,
+      "compactAbove": 207616
     }
   },
-  "independentIntegration": {
-    "scenarios": 40,
-    "requests": 124,
-    "routes": {
-      "GET /v1/models": 40,
-      "POST /v1/chat/completions": 84
-    },
-    "contractViolations": 0,
-    "directSchemaChecks": 24,
-    "selectedOutcomes": {
-      "actual-client-timeout": {
-        "attempts": 2,
-        "keyGroups": [
-          1,
-          1
-        ],
-        "http": [
-          null,
-          409
-        ],
-        "codes": [
-          null,
-          "mixture_already_completed"
-        ],
-        "admissions": 1,
-        "chargeMinorUnits": 3,
-        "exit": 1
-      },
-      "agent-cut-200": {
-        "attempts": 2,
-        "keyGroups": [
-          1,
-          1
-        ],
+  "checkout": {
+    "unitTests": 24,
+    "cases": 53,
+    "catalogGET": 55,
+    "chatPOST": 91,
+    "fileToolSelectors": [
+      "glm-5.3",
+      "deepseek-v4.1-flash",
+      "auto",
+      "auto:cost",
+      "auto:quality",
+      "panel:panda",
+      "panel:panda-quality"
+    ],
+    "faultCases": 19,
+    "rootDialectCases": 7,
+    "nativeHostCases": [
+      "summary",
+      "branch",
+      "retired",
+      "usage",
+      "timeout",
+      "malformed",
+      "stream-error",
+      "count",
+      "format",
+      "logprobs",
+      "zero",
+      "unequal",
+      "neutral",
+      "history",
+      "large",
+      "malformed-pointer",
+      "null-target",
+      "boolean-root",
+      "prefix-and-items",
+      "patterns-and-additional"
+    ],
+    "nativeSummaryStatus": {
+      "compaction": {
+        "discovery": 1,
         "http": [
           200,
-          409
-        ],
-        "codes": [
-          null,
-          "mixture_already_partial"
-        ],
-        "admissions": 1,
-        "chargeMinorUnits": 3,
-        "exit": 1
-      },
-      "agent-definite-503": {
-        "attempts": 3,
-        "keyGroups": [
-          1,
-          2,
-          3
-        ],
-        "http": [
-          503,
-          200,
+          409,
           200
         ],
-        "codes": [
-          "model_unavailable",
-          null,
-          null
-        ],
-        "admissions": 3,
-        "chargeMinorUnits": 6,
-        "exit": 0
+        "posts": 3,
+        "keys": 2,
+        "admissions": 2
       },
-      "agent-lost-completed": {
-        "attempts": 2,
-        "keyGroups": [
-          1,
-          1
-        ],
-        "http": [
-          null,
-          409
-        ],
-        "codes": [
-          null,
-          "mixture_already_completed"
-        ],
-        "admissions": 1,
-        "chargeMinorUnits": 3,
-        "exit": 1
-      },
-      "agent-lost-partial": {
-        "attempts": 2,
-        "keyGroups": [
-          1,
-          1
-        ],
-        "http": [
-          null,
-          409
-        ],
-        "codes": [
-          null,
-          "mixture_already_partial"
-        ],
-        "admissions": 1,
-        "chargeMinorUnits": 3,
-        "exit": 1
-      },
-      "marked-untyped-409": {
-        "attempts": 3,
-        "keyGroups": [
-          1,
-          1,
-          1
-        ],
+      "branch": {
+        "discovery": 1,
         "http": [
           null,
           409,
-          409
-        ],
-        "codes": [
-          null,
-          null,
-          "mixture_already_completed"
-        ],
-        "admissions": 1,
-        "chargeMinorUnits": 3,
-        "exit": 1
-      },
-      "unmarked-untyped-409": {
-        "attempts": 3,
-        "keyGroups": [
-          1,
-          2,
-          3
-        ],
-        "http": [
-          409,
-          200,
           200
         ],
-        "codes": [
-          null,
-          null,
-          null
-        ],
-        "admissions": 3,
-        "chargeMinorUnits": 6,
-        "exit": 0
+        "posts": 3,
+        "keys": 2,
+        "admissions": 2
       }
     },
-    "sourcePackageRevision": "d4e5292"
+    "catalogPolicy": {
+      "coldListGET": 0,
+      "coldOfflinePromptGET": 0,
+      "warmListGET": 0,
+      "supersededEndpointContacts": 0,
+      "incompatibleModelOverridePosts": 0
+    },
+    "syntax": [
+      "Node runtime and test JavaScript",
+      "Python test and fixture AST"
+    ]
   },
-  "schemaComparison": {
-    "inputs": 104,
-    "upstreamUnitInputs": 49,
-    "upstreamApiFixtures": 8,
-    "additionalCases": 47,
-    "matchingNormalizationResults": 101,
-    "mismatchedAdmissionDecisions": 0,
-    "allInputsPreserved": true,
-    "inlineEquivalent": true,
-    "actualReadImageEquivalent": true,
-    "sourcePackageRevision": "d4e5292"
+  "tarballAcceptance": {
+    "cases": 71,
+    "catalogGET": 114,
+    "chatPOST": 77,
+    "allReviewCasesPassed": true,
+    "capturedRequestsCheckedByZero": 17,
+    "compactionKeys": "A,A,B",
+    "branchKeys": "A,A,B",
+    "validatedZeroSettlementMayRetry": true,
+    "unexpectedRedirectHops": 0,
+    "deniedDispatchPOST": {
+      "denied-plain": 0,
+      "denied-override": 0,
+      "denied-upsert": 0,
+      "denied-foreign": 0
+    },
+    "leakedErrorMarkers": 0,
+    "overflowRecognized": true,
+    "memberAndAggregateUsage": {
+      "usage-panel": {
+        "context": 75015,
+        "accounted": 310045,
+        "costUSD": 0.03,
+        "compact": false
+      },
+      "usage-route": {
+        "context": 75015,
+        "accounted": 310045,
+        "costUSD": 0.03,
+        "compact": false
+      },
+      "usage-single": {
+        "context": 75015,
+        "accounted": 75015,
+        "costUSD": 0.01,
+        "compact": false
+      },
+      "usage-missing": {
+        "context": 599,
+        "accounted": 310045,
+        "costUSD": 0,
+        "compact": false
+      },
+      "usage-synthesis-only": {
+        "context": 160015,
+        "accounted": 310045,
+        "costUSD": 0.03,
+        "compact": false
+      }
+    },
+    "providerTimeoutSeconds": {
+      "default": 300,
+      "configured": 600
+    },
+    "shortIdleAndProviderDeadlinesExercised": true,
+    "chatPOSTPerChargedOrUnknownPanelFailure": 1
   },
-  "pack": {
+  "archive": {
     "files": [
       "LICENSE",
       "README.md",
       "index.js",
       "package.json",
       "src/catalog.js",
+      "src/errors.js",
       "src/provider.js",
-      "src/request.js"
+      "src/request.js",
+      "src/usage.js"
     ],
-    "sourceSha256": {
+    "sha256": "93a23b05f081d93fa47fde70f35f7846236e484b27eddae6cacc7299abfe3f05",
+    "bytes": 14076,
+    "unpackedBytes": 40434,
+    "sourceHashes": {
       "LICENSE": "61f97aef30fe1f6f67e3fa62269c9889bb029e7452c5ea796512a27e38f069d4",
-      "README.md": "eb6600c026de10f4c733550eea1ea99ca510b99e955b937f01d4df798ef93320",
-      "index.js": "290c442c5571b7c53486a88ad20f61db1f946806d721ec00f8a764aa591792fa",
+      "README.md": "5a817dd75f9ae4b8e5e7aa5d21ce84864e9821535b3fae38fbf5b6b62eb22ec4",
+      "index.js": "143f778b1c5430a8e7d440c93042582b84638b8ceb810f7fcc7cca5cda259da4",
       "package.json": "ef8157232eec3d909ffef40eff54ddea605d02cf0b3b6f8e3770c1f4bdbdecc2",
-      "src/catalog.js": "dce047673f3db3fe076a0fdff7d8635c77e064803b262ea22a37fe080c95bdb4",
-      "src/provider.js": "4c0192191b7d7ee67ced29897ac0b6d4de447d5d7d33c93db04908cbb8e792eb",
-      "src/request.js": "269c35544336e1e97668d178f66256fd474def8e88b565154a72215a5039d125"
+      "src/catalog.js": "7fa7fcc9029da71baf4d7c970904b21a1157e7243b9e85c12ce8598c22b7044c",
+      "src/errors.js": "68ebfdc298ae541152f355ae8c096959651b2d5f35dc81782f46afd4004e1560",
+      "src/provider.js": "42241f22e8196c31cd208734f92583cf62c8e2397d58890841dc4ffef8ae73dc",
+      "src/request.js": "76e2fed871b4efdefa91f39f8ebef26931fd33ccbeeb3f1dfeee3bb6667f6e96",
+      "src/usage.js": "4d0c10cdaa2309a317f04bb207f3cea100b8790e2fce32156aa1c130e140af68"
     },
-    "archiveSha256": "542a7c457c95acd1c4270ffa3a178c165a29487cd6274fed67545367518899a4",
-    "packedBytes": 11051,
-    "unpackedBytes": 29911,
-    "licenseHolder": "Copyright (c) 2026 panda-repair",
-    "standardMitTermsMatched": true,
-    "freshInstallCatalogGETs": 3,
-    "freshInstallChatPOSTs": 0
+    "actualTarballInstalledOffline": true,
+    "license": "MIT"
   },
-  "runningReplayComparison": {
-    "priorRevision": "d4e5292",
-    "forcedAgentReentryBefore": {
-      "httpPosts": 3,
-      "admittedFixtureRuns": 2,
-      "pendingFixtureRuns": 1,
-      "settledFixtureChargeMinorUnits": 3,
-      "keys": [
-        1,
-        1,
-        3
-      ]
-    },
-    "forcedAgentReentryAfter": {
-      "httpPosts": 2,
-      "admittedFixtureRuns": 1,
-      "pendingFixtureRuns": 1,
-      "settledFixtureChargeMinorUnits": 0,
-      "keys": [
-        1,
-        1
-      ]
-    },
-    "currentScenariosPassed": 9,
-    "currentScenarios": 9,
-    "sourcePackageRevision": "02cdeef"
-  },
-  "contextWindows": {
-    "glm-5.3": 258000,
-    "deepseek-v4.1-flash": 258000,
-    "auto": 224000,
-    "auto:cost": 258000,
-    "auto:quality": 224000,
-    "panel:panda": 224000,
-    "panel:panda-quality": 224000
-  },
-  "maxOutputTokens": 16384,
-  "rootDialectComparisonOn714683e": {
-    "rootSchemaComparisons": 28,
-    "matchingZeroAdmissions": 13,
-    "matchingZeroRefusals": 15,
-    "normalizedToolsInOneChatPost": 13,
-    "chatPostsForRejectedDraft04Draft06OrNestedMarker": 0,
-    "passedPinnedZeroTests": 73
-  },
-  "admissionAndRootDialectRevision": "92fe1a7c2e1923f902d5d30d1407cf13ba0bd38c",
-  "codingAgentGuideRevision": "6ebf36eb81b836d3428fac1b2893915302877f94",
-  "codingAgentGuideVerification": {
-    "baselinePackageRevision": "714683e",
-    "matchingGuideAndRegistrySelectors": 7,
-    "otherRegistryMetadataIdentical": true,
-    "piDefaultCompactionReserveTokens": 16384,
-    "defaultCompactAboveTokensByWindow": {
-      "258000": 241616,
-      "224000": 207616
-    },
-    "cliWindows": [
-      "258K",
-      "224K"
-    ],
-    "cliMaxOutput": "16.4K",
-    "installCommand": "pi install npm:@panda-repair/pi-provider",
-    "sourceParsedByPi": "npm",
-    "systemAndDeveloperBytes": 65536,
-    "maxMessages": 1024
-  }
+  "supersedes": "Checkout 225cbd1 and earlier reports measured a different request adapter and replay policy."
 }
