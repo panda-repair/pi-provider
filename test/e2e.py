@@ -1,5 +1,6 @@
 """Exercise the installed local package with Pi and an ADR 0079 slice C fixture on macOS."""
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -14,7 +15,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_IDS = ("glm-5.3", "deepseek-v4.1-flash", "auto", "auto:cost", "auto:quality", "panel:panda", "panel:panda-quality")
 
 
 def module_from(path):
@@ -50,9 +50,13 @@ def unused_endpoint():
         assert server.contacts == 0, "The superseded endpoint received a request."
 
 
+def picker_ids(output):
+    return {line.split()[1] for line in output.splitlines() if line.startswith("panda ")}
+
+
 def check_fixture_ledger(mock):
     recorder = mock.Recorder(None)
-    body = {"model": "glm-5.3", "messages": [{"role": "user", "content": "fixture"}]}
+    body = {"model": "auto", "messages": [{"role": "user", "content": "fixture"}]}
     _, first_unkeyed = recorder.admit(None, body, None)
     _, second_unkeyed = recorder.admit(None, body, None)
     assert first_unkeyed["id"] != second_unkeyed["id"]
@@ -79,7 +83,7 @@ def main():
         parser.error("This capture runner uses macOS sandbox-exec to restrict client networking to loopback.")
     mock = module_from(ROOT / "test/fixtures/mock_server.py")
     admission = module_from(ROOT / "test/fixtures/admission.py")
-    mock.MODELS = (*MODEL_IDS, "unknown-test-model")
+    model_ids = mock.PANDA_SELECTORS
     work = out / "work"
     work.mkdir()
     env = {"PATH": os.defpath + ":" + str(Path(subprocess.check_output(["which", "node"], text=True).strip()).parent),
@@ -135,7 +139,7 @@ def main():
                     models_file.write_text(json.dumps({"providers": {"panda": override}}))
                     env["PANDA_BASE_URL"] = f"http://127.0.0.1:{decoy.server_port}/v1"
                     cold = run(["--list-models", "panda"], label + "-cold")
-                    assert "glm-5.3" not in cold.stdout and server.recorder.next_id == 1
+                    assert not picker_ids(cold.stdout) and server.recorder.next_id == 1
                     env["PI_OFFLINE"] = "1"
                     run(["-p", "--no-session", "--model", "panda/" + model, "Hello"], label + "-offline", 1)
                     env.pop("PI_OFFLINE")
@@ -149,7 +153,7 @@ def main():
                 if check_cache:
                     count = server.recorder.next_id
                     warm = run(["--list-models", "panda"], label + "-warm")
-                    assert all(model_id in warm.stdout for model_id in MODEL_IDS)
+                    assert picker_ids(warm.stdout) == set(model_ids)
                     assert server.recorder.next_id == count
                     config_model = {"id": model, "name": "Configured test model", "input": ["text"],
                                     "reasoning": False, "contextWindow": 258000, "maxTokens": 16384,
@@ -161,6 +165,27 @@ def main():
                         refused = run(["-p", "--no-session", "--model", "panda/" + model, "Hello"],
                                       label + "-" + api, expect=1)
                         assert "configured provider endpoint" in refused.stderr
+                    assert server.recorder.next_id == count
+                    override.pop("models")
+                    override.pop("api")
+                    models_file.write_text(json.dumps({"providers": {"panda": override}}))
+                    store = Path(env["PI_CODING_AGENT_DIR"]) / "models-store.json"
+                    current = json.loads(store.read_text())["panda"]
+                    assert {row["id"] for row in current["models"]} == set(model_ids)
+                    assert env["PANDA_API_TOKEN"] not in json.dumps(current)
+                    legacy_tag = hashlib.sha256((override["baseUrl"] + "\0" + server.expected_token).encode()).hexdigest()
+                    former = [*current["models"], *(dict(current["models"][0], id=id) for id in mock.BACKEND_GRANTS)]
+                    store.write_text(json.dumps({"panda": {**current, "models": former, "etag": "panda-v1-" + legacy_tag}}))
+                    assert picker_ids(run(["--list-models", "panda"], label + "-upgrade").stdout) == set(model_ids)
+                    assert server.recorder.next_id == count
+                    for index, hidden in enumerate(mock.BACKEND_GRANTS):
+                        for supplied in (False, True):
+                            attrs = {"api": "openai-completions", "models": [dict(config_model, id=hidden)]} if supplied else {}
+                            models_file.write_text(json.dumps({"providers": {"panda": {**override, **attrs}}}))
+                            result_id = f"{label}-retired-{index}-{int(supplied)}"
+                            offered = run(["--list-models", "panda"], result_id + "-list")
+                            assert hidden not in picker_ids(offered.stdout)
+                            run(["-p", "--no-session", "--model", "panda/" + hidden, "Hello"], result_id, expect=1)
                     assert server.recorder.next_id == count
                     models_file.unlink()
             finally:
@@ -185,9 +210,9 @@ def main():
         assert len(keys) == 1
         return keys[0]
 
-    for model in MODEL_IDS:
+    for model in model_ids:
         label = model.replace(":", "-")
-        chat, listed, marker, result, _ = capture(label, model, check_cache=model == MODEL_IDS[0])
+        chat, listed, marker, result, _ = capture(label, model, check_cache=model == model_ids[0])
         assert [r["response_mode"] for r in chat] == ["main_read", "main_final"], label
         assert marker not in chat[0]["raw_body"] and marker in result.stdout, label
         assert any(m["role"] == "tool" and marker in str(m["content"]) for m in chat[1]["body"]["messages"]), label
@@ -200,7 +225,7 @@ def main():
     summary["mockLedger"] = check_fixture_ledger(mock)
     settings = Path(env["PI_CODING_AGENT_DIR"]) / "settings.json"
     config = json.loads(settings.read_text())
-    model = "glm-5.3"
+    model = "auto:cost"
     summary["faults"] = {}
     cases = ["definite", "prehold", "drop_running", "drop_completed", "drop_partial", "unknown", "cut_200", "changed_body"]
     for layer in ("agent", "transport"):
@@ -290,7 +315,7 @@ def main():
              "logprobs", "zero", "unequal", "neutral", "history", "large", "malformed-pointer", "null-target",
              "boolean-root", "prefix-and-items", "patterns-and-additional"]
     for mode in modes:
-        target = "auto:quality" if mode == "usage" else "panel:panda" if mode == "timeout" else "glm-5.3"
+        target = "auto:quality" if mode == "usage" else "panel:panda" if mode == "timeout" else "auto:cost"
         fault = {"summary": "cut_200", "branch": "drop_completed"}.get(mode, mode)
         chat, listed, _, _, recorder = capture("native-" + mode, target, fault, native=mode)
         bodies = [r["body"] for r in chat]
@@ -313,8 +338,16 @@ def main():
                 assert dict((k.lower(), v) for k, v in chat[0]["headers"])["x-stainless-timeout"] == "15"
         summary["native"][mode] = {"discovery": len(listed), "http": [r["response_status"] for r in chat],
                                    "posts": len(chat), "keys": len({key(r) for r in chat}), "admissions": len(recorder.runs)}
+    summary["rewrittenTargets"] = []
+    for index, hidden in enumerate(mock.BACKEND_GRANTS):
+        env["PANDA_FIXTURE_REPLACEMENT"] = hidden
+        chat, listed, _, _, _ = capture("retired-rewrite-" + str(index), "auto", native="rewritten-target")
+        assert not chat
+        summary["rewrittenTargets"].append({"catalogGET": len(listed), "chatPOST": len(chat)})
+    env.pop("PANDA_FIXTURE_REPLACEMENT")
     summary["catalogPolicy"] = {"coldListGET": 0, "coldOfflinePromptGET": 0, "warmListGET": 0, "supersededEndpointContacts": 0,
-                                "incompatibleModelOverridePosts": 0}
+                                "incompatibleModelOverridePosts": 0, "retiredSelectionsPOST": 0,
+                                "legacyCacheVisible": list(model_ids)}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
 

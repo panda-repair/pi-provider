@@ -1,6 +1,7 @@
 import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { createPandaProvider, normalizeBaseUrl } from "./src/provider.js";
+import { isPandaSelector } from "./src/catalog.js";
 import { createRequestKeys } from "./src/request.js";
 
 export default function pandaExtension(pi) {
@@ -32,8 +33,12 @@ export default function pandaExtension(pi) {
     },
   });
   function guardTarget(ctx) {
-    if (ctx.model?.provider !== "panda" || provider.acceptsTarget(ctx.model)) return true;
-    const message = "Panda requires the openai-completions protocol and the configured provider endpoint. Check the selected model in models.json.";
+    if (ctx.model?.provider !== "panda") return true;
+    const supported = isPandaSelector(ctx.model.id);
+    if (supported && provider.acceptsTarget(ctx.model)) return true;
+    const message = supported
+      ? "Panda requires the openai-completions protocol and the configured provider endpoint. Check the selected model in models.json."
+      : "Select one of Panda's Auto or Panel models in Pi.";
     if (ctx.hasUI) ctx.ui.notify(message, "error");
     else process.stderr.write(message + "\n");
     return false;

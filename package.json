@@ -1,7 +1,7 @@
 {
   "name": "@panda-repair/pi-provider",
   "version": "0.1.0",
-  "description": "Use Panda models, Panels and automatic routing in Pi.",
+  "description": "Use Panda Auto selectors and Panels with Pi’s coding tools.",
   "type": "module",
   "license": "MIT",
   "keywords": ["pi-package"],

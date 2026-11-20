@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { describeError } from "../src/errors.js";
 import { createRequestKeys, pandaStream } from "../src/request.js";
 
-const model = { provider: "panda", id: "glm-5.3", baseUrl: "http://127.0.0.1:8100/v1" };
+const model = { provider: "panda", id: "auto:cost", baseUrl: "http://127.0.0.1:8100/v1" };
 function fakeManager(id) {
   return { source: "user-entry", getSessionId: () => id,
     buildSessionProjection() { return { entries: [{ messages: [{}], sourceEntry: { id: this.source } }] }; } };
@@ -29,7 +29,7 @@ test("failed logical requests retain their key, including when an extension chan
   const invoke = pandaStream(fakeNative, keys, () => {});
   async function call(status, { session = "session-one", text = "hello", token = "pnd_it_a", transports = 1, target = model } = {}) {
     const headers = [];
-    await invoke(target, { body: { messages: [{ role: "user", content: text }] }, transports }, {
+    await invoke(target, { body: { model: target.id, messages: [{ role: "user", content: text }] }, transports }, {
       apiKey: token, sessionId: session, headers: { "idempotency-key": "stale" },
       fetch: async (_url, init) => {
         const key = init.headers.get("idempotency-key");
@@ -72,7 +72,7 @@ function retryHarness(selected = model) {
       let stopReason = "error";
       for (const next of responses) {
         try {
-          const reply = await options.fetch(target.baseUrl + "/chat/completions", { method: "POST", body: "{}", headers: { authorization: "Bearer " + options.apiKey } });
+          const reply = await options.fetch(target.baseUrl + "/chat/completions", { method: "POST", body: JSON.stringify({model:target.id}), headers: { authorization: "Bearer " + options.apiKey } });
           observed.push({ status: reply.status, headers: reply.headers, body: await reply.text() });
           stopReason = reply.ok && !next?.cut ? "stop" : "error";
         } catch {
@@ -183,7 +183,7 @@ function bill(status, code, settlement, charge) {
 }
 
 test("Panel and routed failures stop both retry layers unless the settlement proves zero", async () => {
-  for (const id of ["glm-5.3", "panel:panda", "auto:quality"]) {
+  for (const id of ["auto:cost", "panel:panda", "auto:quality"]) {
     for (const charge of [amount("3"), undefined, { ...amount("0"), currency: "other" }, amount("00"), amount("0")]) {
       for (const layer of ["agent", "provider"]) {
         const h = retryHarness({ ...model, id });
@@ -286,4 +286,26 @@ test("cache-disabled foreground retries use the projected entry even when Pi clo
   assert.equal(retry.key, first.key);
   const synthetic = { ...user, content: "Summarize the conversation." };
   assert.notEqual(keys.reserve(options, { messages: [synthetic] }, model, "{}").key, retry.key);
+});
+
+test("peer extensions cannot substitute the paid target and backend names remain valid in customer content", async () => {
+  let dispatched = 0;
+  const keys = createRequestKeys();
+  keys.start(fakeManager("target"));
+  const request = pandaStream(fakeNative, keys, () => {});
+  const params = { model: "auto:cost", messages: [{ role: "user", content: "Compare the backend IDs." }] };
+  const options = { apiKey: "fixture", sessionId: "target", fetch: async () => { dispatched++; return new Response(""); } };
+  for (const replacement of ["glm-5.3", "deepseek-v4.1-flash", "panel:panda", "unknown", undefined]) {
+    const events = request(model, { body: params }, { ...options, onPayload: payload => ({ ...payload, model: replacement }) });
+    await assert.rejects(events.result(), /differs from the selected/);
+  }
+  assert.equal(dispatched, 0);
+  const panel = { ...model, id: "panel:panda" };
+  const literal = { model: panel.id, messages: [{ role: "user", content: "glm-5.3" }], panda: { synthesizer_model: "deepseek-v4.1-flash" } };
+  await request(panel, { body: literal }, { ...options, fetch: async (_url, init) => {
+    assert.equal(init.body, JSON.stringify(literal));
+    dispatched++;
+    return new Response("");
+  } }).result();
+  assert.equal(dispatched, 1);
 });

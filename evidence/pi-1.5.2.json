@@ -1,32 +1,13 @@
 {
   "date": "2026-11-20",
-  "runtimeRevision": "a919f15",
-  "baseline": "225cbd1",
+  "comparisonBase": "88bc3ba",
   "package": "@panda-repair/pi-provider@0.1.0",
-  "scope": "Installed Pi, isolated configuration, synthetic credentials and local transports",
+  "scope": "Pi 1.5.2 with local transports, synthetic credentials and simulated charges",
   "sources": {
     "serverContract": "153bfde8a901bbaf65149ec4228473bce1024a61",
-    "codingAgentGuide": "26b1214ffe5ee975b8abc72e8335545964a64004"
-  },
-  "versions": {
-    "pi_cli": "1.5.2",
-    "pi_ai": "1.5.2",
-    "pi_coding_agent": "1.5.2",
-    "openai": "7.19.0",
-    "node": "v24.21.0",
-    "npm": "11.19.0"
+    "codingAgentGuide": "a9732484eb607c9415a1d1dbc144ccebb26c6f0a"
   },
   "catalog": {
-    "glm-5.3": {
-      "input": 258000,
-      "output": 16384,
-      "compactAbove": 241616
-    },
-    "deepseek-v4.1-flash": {
-      "input": 258000,
-      "output": 16384,
-      "compactAbove": 241616
-    },
     "auto": {
       "input": 224000,
       "output": 16384,
@@ -54,22 +35,20 @@
     }
   },
   "checkout": {
-    "unitTests": 24,
-    "cases": 53,
+    "unitTests": 27,
+    "fixtureScenarios": 53,
     "catalogGET": 55,
-    "chatPOST": 91,
+    "chatPOST": 87,
     "fileToolSelectors": [
-      "glm-5.3",
-      "deepseek-v4.1-flash",
       "auto",
       "auto:cost",
       "auto:quality",
       "panel:panda",
       "panel:panda-quality"
     ],
-    "faultCases": 19,
-    "rootDialectCases": 7,
-    "nativeHostCases": [
+    "faultScenarios": 19,
+    "customToolSchemaScenarios": 7,
+    "nativeHostScenarios": [
       "summary",
       "branch",
       "retired",
@@ -91,8 +70,33 @@
       "prefix-and-items",
       "patterns-and-additional"
     ],
+    "wireTargetSubstitutions": [
+      {
+        "catalogGET": 1,
+        "chatPOST": 0
+      },
+      {
+        "catalogGET": 1,
+        "chatPOST": 0
+      }
+    ],
+    "cacheAndPolicy": {
+      "coldListGET": 0,
+      "coldOfflinePromptGET": 0,
+      "warmListGET": 0,
+      "supersededEndpointContacts": 0,
+      "incompatibleModelOverridePosts": 0,
+      "retiredSelectionsPOST": 0,
+      "legacyCacheVisible": [
+        "auto",
+        "auto:cost",
+        "auto:quality",
+        "panel:panda",
+        "panel:panda-quality"
+      ]
+    },
     "nativeSummaryStatus": {
-      "compaction": {
+      "summary": {
         "discovery": 1,
         "http": [
           200,
@@ -114,78 +118,13 @@
         "keys": 2,
         "admissions": 2
       }
-    },
-    "catalogPolicy": {
-      "coldListGET": 0,
-      "coldOfflinePromptGET": 0,
-      "warmListGET": 0,
-      "supersededEndpointContacts": 0,
-      "incompatibleModelOverridePosts": 0
-    },
-    "syntax": [
-      "Node runtime and test JavaScript",
-      "Python test and fixture AST"
-    ]
-  },
-  "tarballAcceptance": {
-    "cases": 71,
-    "catalogGET": 114,
-    "chatPOST": 77,
-    "allReviewCasesPassed": true,
-    "capturedRequestsCheckedByZero": 17,
-    "compactionKeys": "A,A,B",
-    "branchKeys": "A,A,B",
-    "validatedZeroSettlementMayRetry": true,
-    "unexpectedRedirectHops": 0,
-    "deniedDispatchPOST": {
-      "denied-plain": 0,
-      "denied-override": 0,
-      "denied-upsert": 0,
-      "denied-foreign": 0
-    },
-    "leakedErrorMarkers": 0,
-    "overflowRecognized": true,
-    "memberAndAggregateUsage": {
-      "usage-panel": {
-        "context": 75015,
-        "accounted": 310045,
-        "costUSD": 0.03,
-        "compact": false
-      },
-      "usage-route": {
-        "context": 75015,
-        "accounted": 310045,
-        "costUSD": 0.03,
-        "compact": false
-      },
-      "usage-single": {
-        "context": 75015,
-        "accounted": 75015,
-        "costUSD": 0.01,
-        "compact": false
-      },
-      "usage-missing": {
-        "context": 599,
-        "accounted": 310045,
-        "costUSD": 0,
-        "compact": false
-      },
-      "usage-synthesis-only": {
-        "context": 160015,
-        "accounted": 310045,
-        "costUSD": 0.03,
-        "compact": false
-      }
-    },
-    "providerTimeoutSeconds": {
-      "default": 300,
-      "configured": 600
-    },
-    "shortIdleAndProviderDeadlinesExercised": true,
-    "chatPOSTPerChargedOrUnknownPanelFailure": 1
+    }
   },
   "archive": {
-    "files": [
+    "sha256": "c95e601b96f9bb524e6d15238bb2cda02ee7203ec8045712f60632ceac8b2207",
+    "bytes": 14434,
+    "unpackedBytes": 41749,
+    "members": [
       "LICENSE",
       "README.md",
       "index.js",
@@ -196,22 +135,57 @@
       "src/request.js",
       "src/usage.js"
     ],
-    "sha256": "93a23b05f081d93fa47fde70f35f7846236e484b27eddae6cacc7299abfe3f05",
-    "bytes": 14076,
-    "unpackedBytes": 40434,
     "sourceHashes": {
       "LICENSE": "61f97aef30fe1f6f67e3fa62269c9889bb029e7452c5ea796512a27e38f069d4",
-      "README.md": "5a817dd75f9ae4b8e5e7aa5d21ce84864e9821535b3fae38fbf5b6b62eb22ec4",
-      "index.js": "143f778b1c5430a8e7d440c93042582b84638b8ceb810f7fcc7cca5cda259da4",
-      "package.json": "ef8157232eec3d909ffef40eff54ddea605d02cf0b3b6f8e3770c1f4bdbdecc2",
-      "src/catalog.js": "7fa7fcc9029da71baf4d7c970904b21a1157e7243b9e85c12ce8598c22b7044c",
+      "README.md": "2cfae847e050b97116e4e6922d6c5a52f5377a88c3ba8587e0e5e72623e5f5c2",
+      "index.js": "9a2a8363ccc369b42edeb2cdbd3d13ef56799499d5cdc88d0e894c578bd469e7",
+      "package.json": "7b3e8eb306f2216053b01e78b1aff44457b8621917b08f8c7eb3a463f6ad99b8",
+      "src/catalog.js": "7fc3397e3857559b4d4ef2f6413a0cd775eb320507a9522cd5200d002f129dca",
       "src/errors.js": "68ebfdc298ae541152f355ae8c096959651b2d5f35dc81782f46afd4004e1560",
-      "src/provider.js": "42241f22e8196c31cd208734f92583cf62c8e2397d58890841dc4ffef8ae73dc",
-      "src/request.js": "76e2fed871b4efdefa91f39f8ebef26931fd33ccbeeb3f1dfeee3bb6667f6e96",
+      "src/provider.js": "bf8be96721b7f30188ea19aa2339b0ad127bcdbf7099ecfc07158376484b1302",
+      "src/request.js": "7c9f1eaf809ba26553dc8bf86339d2e6e75ca28085d2e7ec3520d95d1a99a42d",
       "src/usage.js": "4d0c10cdaa2309a317f04bb207f3cea100b8790e2fce32156aa1c130e140af68"
     },
-    "actualTarballInstalledOffline": true,
-    "license": "MIT"
+    "dryRunMatches": true
   },
-  "supersedes": "Checkout 225cbd1 and earlier reports measured a different request adapter and replay policy."
+  "priorContractVerification": {
+    "revision": "88bc3ba",
+    "serverAdmissionRequests": 17,
+    "scope": "Captured ADR 0079 slice C requests from the earlier review. Its seven-selector inventory was replaced."
+  },
+  "versions": {
+    "pi_cli": "1.5.2",
+    "pi_ai": "1.5.2",
+    "pi_coding_agent": "1.5.2",
+    "openai": "7.19.0",
+    "node": "v24.21.0",
+    "npm": "11.19.0"
+  },
+  "offlineTarballAcceptance": {
+    "nativeCases": 39,
+    "catalogSessionCacheAndFileTool": 30,
+    "retainedSafetyCases": 9,
+    "totalCatalogGET": 65,
+    "totalChatPOST": 36,
+    "baselineUpgradeSetup": {
+      "catalogGET": 13,
+      "chatPOST": 5
+    },
+    "currentPackage": {
+      "catalogGET": 52,
+      "chatPOST": 31,
+      "fileToolRoundTrips": 5
+    },
+    "idleResume": {
+      "catalogGET": 0,
+      "chatPOST": 0
+    },
+    "retiredSelection": {
+      "explicitChatPOST": 0,
+      "configuredChatPOST": 0,
+      "rewrittenChatPOST": 0
+    },
+    "resumedNewPrompt": "Pi selected the permitted Auto fallback. A token with no grants produced zero Chat POSTs.",
+    "independentReportHash": "073e2745650a1fe5d2c8d5625859f3439f5ac84f07549334b7cb823ea73d306c"
+  }
 }

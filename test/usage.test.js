@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { catalog } from "../src/catalog.js";
 import { responseUsage } from "../src/usage.js";
 import { pandaStream, createRequestKeys } from "../src/request.js";
 
@@ -45,6 +46,9 @@ test("Panel transport honors explicit short and long timeouts and a ten-minute s
 
 test("the user guide states the authorization, compaction and settlement rules", () => {
   const guide = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const rows = [...guide.matchAll(/^\| `panda\/([^`]+)` \| ([\d,]+)/gm)];
+  assert.deepEqual(rows.map(([, id, window]) => [id, Number(window.replaceAll(",", ""))]),
+    catalog.map(model => [model.id, model.contextWindow]));
   for (const text of ["token saved by `/login` takes precedence over `PANDA_API_TOKEN`", "`/logout`",
     "187,000", "170,616", "up to three", "3/2", "once per run", "pending and may be zero",
     "ADR 0079 slice C", "httpIdleTimeoutMs", "retry.provider.timeoutMs"]) assert.ok(guide.includes(text), text);

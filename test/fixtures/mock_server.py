@@ -8,7 +8,10 @@ import time
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlsplit
 
-MODELS = ("glm-5.3", "panel:panda", "auto:cost")
+PANDA_SELECTORS = ("auto", "auto:cost", "auto:quality", "panel:panda", "panel:panda-quality")
+# These raw grants make a router eligible. The integration runner never selects a backend for a successful turn.
+BACKEND_GRANTS = ("glm-5.3", "deepseek-v4.1-flash")
+MODELS = (*PANDA_SELECTORS, *BACKEND_GRANTS, "unknown-test-model")
 SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "x-api-key", "api-key", "cookie"}
 
 

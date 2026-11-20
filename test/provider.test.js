@@ -1,16 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { catalog, compat, permittedModels } from "../src/catalog.js";
-import { createPandaProvider, defaultBaseUrl, normalizeBaseUrl } from "../src/provider.js";
+import { catalog, compat, modelDefinitions } from "../src/catalog.js";
+import { createHash } from "node:crypto";
+import { createPandaProvider, defaultBaseUrl, normalizeBaseUrl, permittedModels } from "../src/provider.js";
 
 const baseUrl = "http://127.0.0.1:8100/v1";
-const ids = ["glm-5.3", "deepseek-v4.1-flash", "auto", "auto:cost", "auto:quality", "panel:panda", "panel:panda-quality"];
+const backendGrants = ["glm-5.3", "deepseek-v4.1-flash"];
+const ids = ["auto", "auto:cost", "auto:quality", "panel:panda", "panel:panda-quality"];
 const signal = new AbortController().signal;
 
 function rig() {
   let key = "pnd_it_local";
   let stored;
-  let response = () => Response.json({ data: [{ id: "auto" }, { id: "glm-5.3" }, { id: "foreign" }] });
+  let response = () => Response.json({ data: [{ id: "auto" }, { id: "auto:cost" }, { id: backendGrants[0] }, { id: "foreign" }] });
   const requests = [];
   const streams = { stream() { throw new Error("Transport called"); }, streamSimple() { throw new Error("Transport called"); } };
   const provider = createPandaProvider({ baseUrl, streams,
@@ -22,15 +24,15 @@ function rig() {
   return { provider, refresh, requests, key: value => { key = value; }, respond: fn => { response = fn; }, cached: () => stored };
 }
 
-test("the seven allowed, text-only models use the Panda adapter and their per-selector compaction windows", () => {
+test("the five allowed, text-only models use the Panda adapter and their per-selector compaction windows", () => {
   const windows = {
-    "glm-5.3": 258_000, "deepseek-v4.1-flash": 258_000, "auto:cost": 258_000,
+    "auto:cost": 258_000,
     "panel:panda": 224_000, "panel:panda-quality": 224_000, auto: 224_000, "auto:quality": 187_000,
   };
   assert.deepEqual(catalog.map(model => model.id), ids);
-  const models = permittedModels([...ids.map(id => ({ id })), { id: "auto" }, { id: "unknown" }], baseUrl);
+  const models = permittedModels([...ids, ...backendGrants, "auto", "unknown"].map(id => ({id})), baseUrl);
   assert.deepEqual(models.map(model => model.id), ids);
-  for (const [index, model] of models.entries()) {
+  for (const model of models) {
     assert.equal(model.api, "openai-completions");
     assert.equal(model.provider, "panda");
     assert.equal(model.baseUrl, baseUrl);
@@ -42,7 +44,7 @@ test("the seven allowed, text-only models use the Panda adapter and their per-se
       supportsStore: false, supportsReasoningEffort: false, promptCacheKeyMode: "disabled",
       supportsLongCacheRetention: false, supportsDeveloperRole: true, supportsUsageInStreaming: true,
     });
-    assert.ok(Object.values(model.cost).every(cost => index < 2 ? cost > 0 : cost === 0));
+    assert.ok(Object.values(model.cost).every(cost => cost === 0));
     assert.notStrictEqual(model.compat, compat);
   }
   assert.throws(() => permittedModels({}, baseUrl), /invalid model list/);
@@ -79,7 +81,7 @@ test("authorized discovery intersects the static catalog, filters composed rows 
   assert.equal(requests[0].url, baseUrl + "/models");
   assert.equal(requests[0].signal, signal);
   assert.equal(requests[0].redirect, "error");
-  assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["glm-5.3", "auto"]);
+  assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["auto", "auto:cost"]);
   const allowed = provider.filterModels(provider.getModels(), undefined)[0];
   const unavailable = { ...allowed, id: "auto:quality" };
   const unknown = { ...allowed, id: "other" };
@@ -118,15 +120,15 @@ test("a rejected generation cannot overwrite the current catalog", async () => {
   await refresh();
   respond(() => Response.json({ data: [{ id: "panel:panda-quality" }] }));
   await refresh({ publish: async () => false });
-  assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["glm-5.3", "auto"]);
+  assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["auto", "auto:cost"]);
 });
 
 test("router IDs require a listed coding route and the router's own grant", () => {
   const routers = ["auto", "auto:cost", "auto:quality"];
   const get = ids => permittedModels(ids.map(id => ({ id })), baseUrl).map(row => row.id);
   assert.deepEqual(get([...routers, "gemma-4-26b", "panel:panda-quality"]), ["panel:panda-quality"]);
-  assert.deepEqual(get(["glm-5.3"]), ["glm-5.3"]);
-  for (const id of ["glm-5.3", "deepseek-v4.1-flash", "panel:panda"]) {
+  assert.deepEqual(get(backendGrants), []);
+  for (const id of [...backendGrants, "panel:panda"]) {
     for (const router of routers) assert.equal(get([router, id]).includes(router), id !== "panel:panda" || router !== "auto:cost");
   }
 });
@@ -172,10 +174,61 @@ test("discovery failures expose no upstream body or transport details", async ()
 
 test("an authenticated empty grant stays empty in both registered and available inventories", async () => {
   const { provider, refresh, respond } = rig();
-  assert.equal(provider.getModels().length, 7);
+  assert.equal(provider.getModels().length, 5);
   respond(() => Response.json({ data: ["auto","auto:cost","auto:quality","gemma-4-26b"].map(id=>({id})) }));
   await refresh();
   assert.deepEqual(provider.getModels().map(model => model.api), ["openai-completions"]);
   assert.deepEqual(provider.getAllModels(), []);
   assert.deepEqual(provider.filterModels([{ ...catalog[0], provider: "panda", baseUrl }], undefined), []);
+});
+
+test("authenticated snapshots retain route eligibility across restarts and exclude injected selectors", async () => {
+  const original = rig();
+  const cold = original.provider.getModels().map(model => model.id);
+  assert.deepEqual(cold, ids);
+  original.respond(() => Response.json({ data: ["auto:cost", backendGrants[1], "other"].map(id => ({id})) }));
+  await original.refresh();
+  const snapshot = original.cached();
+  assert.match(snapshot.etag, /^panda-v2-[a-f0-9]{64}$/);
+  assert.deepEqual(snapshot.models.map(model => model.id), ["auto:cost"]);
+  const fresh = rig();
+  await fresh.refresh({ allowNetwork: false, stored: snapshot });
+  assert.deepEqual(fresh.provider.getAllModels().map(model => model.id), ["auto:cost"]);
+  assert.equal(fresh.provider.filterAllModels([...modelDefinitions(baseUrl), {...snapshot.models[0], type:"image"}]).length, 1);
+  for (const id of backendGrants) {
+    assert.throws(() => fresh.provider.streamSimple({...snapshot.models[0], id}, {}, {apiKey:"pnd_it_local"}), /no cached grant/);
+  }
+  const injected = { ...snapshot, models: [...snapshot.models, ...modelDefinitions(baseUrl)] };
+  await fresh.refresh({ allowNetwork: false, stored: injected });
+  assert.deepEqual(fresh.provider.filterModels(modelDefinitions(baseUrl)), []);
+  assert.equal(fresh.requests.length, 0);
+});
+
+test("old scoped snapshots migrate underlying grants without exposing retired or unknown IDs", async () => {
+  const old = (models, token = "pnd_it_local") => ({
+    etag: "panda-v1-" + createHash("sha256").update(baseUrl).update("\0").update(token).digest("hex"),
+    models: models.map(id => ({ id, provider: "panda", api: "openai-completions", baseUrl })),
+  });
+  for (const [raw, expected] of [
+    [[...ids, ...backendGrants, "foreign"], ids],
+    [["auto:cost", backendGrants[0]], ["auto:cost"]],
+    [["auto:cost", backendGrants[1]], ["auto:cost"]],
+    [["auto:cost", "auto", "auto:quality", "panel:panda"], ["auto", "auto:quality", "panel:panda"]],
+    [["auto:cost", "auto:quality", "panel:panda-quality"], ["panel:panda-quality"]],
+    [backendGrants, []],
+  ]) {
+    const fresh = rig();
+    const stored = old(raw);
+    await fresh.refresh({ allowNetwork: false, stored });
+    assert.deepEqual(fresh.provider.getAllModels().map(model => model.id), expected);
+    assert.deepEqual(fresh.provider.filterModels(modelDefinitions(baseUrl)).map(model => model.id), expected);
+    assert.equal(fresh.requests.length, 0);
+    const injected = old(["auto:cost", backendGrants[0]]);
+    injected.models[1].provider = "another-provider";
+    await fresh.refresh({ allowNetwork: false, stored: injected });
+    assert.deepEqual(fresh.provider.filterModels(modelDefinitions(baseUrl)), []);
+    fresh.key("pnd_it_changed");
+    await fresh.refresh({ allowNetwork: false, stored });
+    assert.deepEqual(fresh.provider.filterModels(modelDefinitions(baseUrl)), []);
+  }
 });

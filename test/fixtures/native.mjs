@@ -26,6 +26,12 @@ if (mode === "summary" || mode === "branch") {
   try { await summarize(); } catch { /* A truncated or disconnected first response loses the answer. */ }
   const next = await summarize();
   assert.match(next.text ?? next.summary, /Read a scratch fixture/);
+} else if (mode === "rewritten-target") {
+  const result = await stream(model, { messages: [user] }, {
+    ...options, onPayload: payload => ({ ...payload, model: process.env.PANDA_FIXTURE_REPLACEMENT }),
+  }).result();
+  assert.equal(result.stopReason, "error");
+  assert.match(result.errorMessage, /differs from the selected/);
 } else if (mode === "retired") {
   const { session } = await pi.createAgentSessionFromServices({
     services, model, sessionManager: pi.SessionManager.inMemory(process.cwd()), tools: ["read"],

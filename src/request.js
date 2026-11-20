@@ -95,6 +95,13 @@ export function pandaStream(stream, keys, assertAvailable, observe) {
           failure = "Panda refused a request with a mismatched endpoint or credential.";
           throw new Error(failure);
         }
+        // A peer extension can replace the payload after Pi selects the paid target.
+        let wireModel;
+        try { wireModel = JSON.parse(init?.body)?.model; } catch { /* A malformed body has no verifiable target. */ }
+        if (wireModel !== model.id) {
+          failure = "Panda refused a request whose model differs from the selected Auto or Panel.";
+          throw new Error(failure);
+        }
         if (!attempt) {
           try { attempt = keys.reserve(options, context, model, init?.body); }
           catch (error) { failure = error.message; throw error; }
