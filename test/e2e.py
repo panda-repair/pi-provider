@@ -187,6 +187,14 @@ def main():
                             assert hidden not in picker_ids(offered.stdout)
                             run(["-p", "--no-session", "--model", "panda/" + hidden, "Hello"], result_id, expect=1)
                     assert server.recorder.next_id == count
+                    override["apiKey"] = "$PANDA_FIXTURE_CUSTOM_TOKEN"
+                    models_file.write_text(json.dumps({"providers": {"panda": override}}))
+                    env["PANDA_FIXTURE_CUSTOM_TOKEN"] = server.expected_token
+                    assert picker_ids(run(["--list-models", "panda"], label + "-custom-warm").stdout) == set(model_ids)
+                    env["PANDA_FIXTURE_CUSTOM_TOKEN"] = "pnd_it_rotated_fixture"
+                    assert not picker_ids(run(["--list-models", "panda"], label + "-custom-rotate").stdout)
+                    env.pop("PANDA_FIXTURE_CUSTOM_TOKEN")
+                    assert server.recorder.next_id == count
                     models_file.unlink()
             finally:
                 server.shutdown()
@@ -227,66 +235,51 @@ def main():
     config = json.loads(settings.read_text())
     model = "auto:cost"
     summary["faults"] = {}
-    cases = ["definite", "prehold", "drop_running", "drop_completed", "drop_partial", "unknown", "cut_200", "changed_body"]
+    cases = ["definite", "prehold", "concurrency", "funding", "drop_running", "drop_completed", "drop_partial",
+             "unknown", "cut_200", "changed_body", "server_500", "upstream", "interrupted"]
     for layer in ("agent", "transport"):
+        config["retry"] = {"enabled": layer == "agent", "maxRetries": 3, "baseDelayMs": 5,
+                           "provider": {"maxRetries": 3 if layer == "transport" else 0}}
+        settings.write_text(json.dumps(config))
         for fault in cases:
-            if layer == "transport" and fault in ("unknown", "cut_200", "changed_body"):
-                # The shipped service vetoes transport retries for its semantic 503s.
-                # SSE consumption occurs after that layer, and onPayload runs once per stream.
-                continue
-            config["retry"] = {"enabled": layer == "agent", "baseDelayMs": 10,
-                               "provider": {"maxRetries": 1 if layer == "transport" else 0}}
-            settings.write_text(json.dumps(config))
-            success = fault in ("definite", "prehold")
             label = layer + "-" + fault
-            env["PANDA_FIXTURE_CHANGE_REPLAY"] = "1" if fault == "changed_body" else "0"
+            env["PANDA_FIXTURE_CHANGE_REPLAY"] = str(int(fault == "changed_body"))
             scenario = "drop_completed" if fault == "changed_body" else fault
             if layer == "transport" and fault == "definite":
-                # Model a gateway that omits x-should-retry so Pi elects to retry inside one stream.
                 scenario = "definite_proxy"
+            throttle = fault in ("prehold", "concurrency")
             chat, _, marker, result, recorder = capture(label, model, scenario,
-                extension=fault == "changed_body", expect=0 if success else 1)
-            assert len(chat) == (3 if success else 2), (label, len(chat))
+                extension=fault == "changed_body", expect=0 if throttle else 1)
             keys = [key(r) for r in chat]
-            if success:
-                assert len(set(keys)) == len(keys) and marker in result.stdout, label
+            if throttle:
+                assert len(chat) == 3 and keys[0] == keys[1] != keys[2] and marker in result.stdout, label
+                assert chat[0]["raw_body"] == chat[1]["raw_body"], label
+                assert len(recorder.runs) == 2, label
             else:
-                assert keys[0] == keys[1] and len(recorder.runs) == 1, label
-                assert chat[-1]["response_status"] == 409, label
-                if fault == "changed_body":
-                    assert chat[-1]["error_code"] == "mixture_idempotency_conflict", label
-                elif fault == "drop_running":
-                    assert chat[-1]["error_code"] == "mixture_already_running", label
-                    receipt = chat[-1]["receipt"]
-                    assert receipt["charge"] is None and receipt["held"] is None and receipt["status"] == "running", label
-                    assert receipt["run_id"] == chat[0]["run_id"] and receipt["run_id"] in result.stderr, label
-                    assert next(iter(recorder.runs.values()))["status"] == "running", label
-                    assert all(part in result.stderr for part in ("still running", "may be zero",
-                        "answer cannot be recovered", "separate, potentially billable run")), label
+                assert len(chat) == 1, label
+                if fault == "funding":
+                    assert not recorder.runs, label
+                elif fault == "definite":
+                    assert "US$0.00" in result.stderr, label
                 else:
-                    assert chat[-1]["error_code"] == ("mixture_already_partial" if fault == "drop_partial" else "mixture_already_completed"), label
-                    assert "earlier request finished" in result.stderr and "US$0.01" in result.stderr, label
+                    assert "may have run and been charged" in result.stderr, label
+                if fault == "changed_body":
+                    assert "Transformed fixture" in chat[0]["raw_body"], label
             summary["faults"][label] = {"http": [r["response_status"] for r in chat], "distinctKeys": len(set(keys)),
-                "codes": [r.get("error_code") for r in chat], "recordedRuns": len(recorder.runs),
-                "chargedFixtureRuns": sum((run["cents"] or 0) > 0 for run in recorder.runs.values()),
-                "exit": result.returncode, "contractViolations": 0}
-            if fault == "drop_running":
-                summary["faults"][label]["receipt"] = {k: receipt[k] for k in ("status", "charge", "held")}
-    for layer in ("agent", "transport"):
-        config["retry"] = {"enabled": layer == "agent", "baseDelayMs": 10, "provider": {"maxRetries": int(layer == "transport")}}
-        settings.write_text(json.dumps(config))
+                "codes": [r.get("error_code") for r in chat], "recordedRuns": len(recorder.runs), "exit": result.returncode}
         for kind in ("paid", "unknown", "zero"):
             name = "panel_failed_" + kind
             label = layer + "-" + name
-            chat, _, marker, result, recorder = capture(label, "panel:panda", name, expect=0 if kind == "zero" else 1)
+            chat, _, _, result, recorder = capture(label, "panel:panda", name, expect=1)
             charges = [operation["cents"] for operation in recorder.runs.values()]
-            if kind == "zero":
-                assert len(chat) == 3 and len({key(r) for r in chat}) == 3 and marker in result.stdout, label
-            else:
-                assert len(chat) == 1 and charges == [3], label
-                assert ("US$0.03" if kind == "paid" else "amount is unknown") in result.stderr, label
+            assert len(chat) == 1 and len(charges) == 1, label
+            assert {"paid": "US$0.03", "zero": "US$0.00", "unknown": "settlement amount is unknown"}[kind] in result.stderr, label
             summary["faults"][label] = {"posts": len(chat), "fixtureCents": charges, "exit": result.returncode}
     env.pop("PANDA_FIXTURE_CHANGE_REPLAY")
+    chat, listed, _, result, _ = capture("discovery-401", "auto", "discovery-401", expect=1)
+    assert not chat and len(listed) == 1 and "HTTP 401" in result.stderr and "inference_token_invalid" in result.stderr
+    assert "private-marker" not in result.stderr
+    summary["discovery401"] = {"catalogGET": 1, "chatPOST": 0, "safeCodeReported": True}
     summary["rootDialects"] = {}
     dialects = {"local-references": "", "2020-12": "https://json-schema.org/draft/2020-12/schema",
                 "2019-09": "http://json-schema.org/draft/2019-09/schema#", "draft-07": "http://json-schema.org/draft-07/schema#",
@@ -314,14 +307,20 @@ def main():
     modes = ["summary", "branch", "retired", "usage", "timeout", "malformed", "stream-error", "count", "format",
              "logprobs", "zero", "unequal", "neutral", "history", "large", "malformed-pointer", "null-target",
              "boolean-root", "prefix-and-items", "patterns-and-additional"]
+    modes += ["virtual", "standalone", "large-failed-turn", "settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"]
     for mode in modes:
         target = "auto:quality" if mode == "usage" else "panel:panda" if mode == "timeout" else "auto:cost"
-        fault = {"summary": "cut_200", "branch": "drop_completed"}.get(mode, mode)
+        if mode in ("virtual", "large-failed-turn"):
+            target = "panel:panda"
+        fault = {"summary": "cut_200", "branch": "drop_completed", "virtual": "panel_failed_paid",
+                 "large-failed-turn": "server_500"}.get(mode, mode)
         chat, listed, _, _, recorder = capture("native-" + mode, target, fault, native=mode)
         bodies = [r["body"] for r in chat]
         if mode in ("summary", "branch"):
-            assert len(chat) == 3 and key(chat[0]) == key(chat[1]) != key(chat[2]), mode
-            assert chat[0]["raw_body"] == chat[1]["raw_body"] and len(recorder.runs) == 2, mode
+            assert len(chat) == 2 and key(chat[0]) != key(chat[1]), mode
+            assert len(recorder.runs) == 2, mode
+        elif mode == "standalone":
+            assert len(chat) == 2 and key(chat[0]) != key(chat[1]), mode
         elif mode == "retired":
             assert len(chat) == 3 and not bodies[-1].get("tools")
             assert any(m.get("tool_calls") for m in bodies[-1]["messages"]) and any(m["role"] == "tool" for m in bodies[-1]["messages"])
@@ -345,7 +344,7 @@ def main():
         assert not chat
         summary["rewrittenTargets"].append({"catalogGET": len(listed), "chatPOST": len(chat)})
     env.pop("PANDA_FIXTURE_REPLACEMENT")
-    summary["catalogPolicy"] = {"coldListGET": 0, "coldOfflinePromptGET": 0, "warmListGET": 0, "supersededEndpointContacts": 0,
+    summary["catalogPolicy"] = {"customWarmListGET": 0, "rotatedCustomVisible": [], "coldListGET": 0, "coldOfflinePromptGET": 0, "warmListGET": 0, "supersededEndpointContacts": 0,
                                 "incompatibleModelOverridePosts": 0, "retiredSelectionsPOST": 0,
                                 "legacyCacheVisible": list(model_ids)}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

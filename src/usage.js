@@ -44,3 +44,30 @@ export function responseUsage(model) {
     },
   };
 }
+
+// Keep receipt accounting separate from request identity. The short cache covers
+// concurrent streams and standalone calls. Saved Pi messages cover older session receipts.
+export function settlementAccounting() {
+  const recent = new Set();
+  let history, evicted = false;
+  return {
+    bind(manager) { history = manager; },
+    apply(message, receipt, key, responseId) {
+      const charge = receipt?.charge;
+      if (!charge) return message;
+      const id = receipt.run_id ?? responseId ?? receipt.request_id ?? key;
+      const duplicate = recent.has(id) || (receipt.replay && (!receipt.run_id || evicted || history?.getEntries().some(entry =>
+        entry.type === "message" && entry.message?.provider === "panda" &&
+        entry.message.diagnostics?.some(item => item.type === "panda.settlement" && item.details?.runId === id))));
+      recent.add(id);
+      if (recent.size > 1024) {
+        recent.delete(recent.values().next().value);
+        evicted = true;
+      }
+      const total = duplicate ? 0 : Number(charge.minor_units) / 100;
+      return { ...message, usage: { ...message.usage, cost: { ...message.usage.cost, total, totalFromProvider: true } },
+        diagnostics: [...(message.diagnostics ?? []), { type: "panda.settlement", timestamp: message.timestamp,
+          details: { ...(receipt.run_id && { runId: receipt.run_id }), usdCents: charge.minor_units, counted: !duplicate } }] };
+    },
+  };
+}

@@ -2,7 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 import routingBackendGrants from "./routing-backend-grants.json" with { type: "json" };
 import { modelDefinitions } from "./catalog.js";
 import { boundedJSON, describeError } from "./errors.js";
-import { createRequestKeys, pandaStream } from "./request.js";
+import { pandaStream } from "./request.js";
 
 export const defaultBaseUrl = "https://app.panda.repair/v1";
 
@@ -49,7 +49,7 @@ function grantTag(url, token, models) {
   return "panda-v2-" + createHmac("sha256", token).update(JSON.stringify([url, models.map(model => model.id)])).digest("hex");
 }
 
-export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, pickerKey, keys = createRequestKeys(), observe }) {
+export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, pickerKey, ...transport }) {
   let endpoint = baseUrl;
   let hostEndpoint;
   let effective;
@@ -179,8 +179,8 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
         throw new Error(message);
       }
     },
-    stream: pandaStream(streams.stream, keys, assertAvailable, observe),
-    streamSimple: pandaStream(streams.streamSimple, keys, assertAvailable, observe),
+    stream: pandaStream(streams.stream, assertAvailable, transport),
+    streamSimple: pandaStream(streams.streamSimple, assertAvailable, transport),
   };
 }
 

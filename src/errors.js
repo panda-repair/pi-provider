@@ -11,17 +11,6 @@ const codes = new Set((
   "answer_incomplete no_answers model_unavailable model_refused interrupted outcome_unknown mixture_store_unavailable " +
   "inference_upstream_unavailable"
 ).split(" "));
-const beforeAdmission = new Map([
-  [400, ["invalid_request", "unsupported_parameter", "conflicting_parameters", "unsupported_message_order", "idempotency_key_invalid",
-    "mixture_model_unavailable", "context_length_exceeded", "mixture_cost_bound_exceeded", "inference_request_invalid"]],
-  [401, ["inference_token_invalid"]], [402, ["insufficient_workspace_balance", "commercial_balance_correction_required"]],
-  [403, ["mixture_model_denied", "inference_authority_denied", "inference_personal_owner_required"]],
-  [404, ["chat_completions_not_enabled", "model_not_found", "route_not_found"]], [405, ["method_not_allowed"]],
-  [413, ["inference_request_too_large", "input_too_large"]],
-  [429, ["throttle_mixture_concurrency_exhausted", "throttle_workspace_rate_limited", "throttle_commercial_balance_source_bound_exceeded"]],
-]);
-const unsuccessful = new Set(["answer_invalid", "answer_incomplete", "no_answers", "model_unavailable", "model_refused", "request_invalid", "authority_revoked"]);
-const uncertain = new Set(["internal_error", "interrupted", "outcome_unknown", "mixture_store_unavailable", "inference_upstream_unavailable"]);
 const statuses = new Set(["running", "completed", "partial", "failed"]);
 const fields = new Set(("model messages tools tool_choice parallel_tool_calls max_tokens max_completion_tokens stream stream_options " +
   "n logprobs top_logprobs response_format temperature top_p stop user seed store metadata service_tier functions function_call " +
@@ -71,7 +60,7 @@ export async function boundedJSON(response, limit = 16_384, timeout = 1000) {
   }
 }
 
-function settlement(code, source) {
+export function settlement(code, source) {
   const valid = source?.version === "panda.chat.v1" && statuses.has(source.status);
   if (!valid) return;
   const status = source.status;
@@ -91,91 +80,52 @@ function moneyText(charge) {
   return "The settled charge is US$" + Math.floor(cents / 100) + "." + String(cents % 100).padStart(2, "0") + ".";
 }
 
-export function describeError(status, data, headers) {
+
+export const unknownOutcome = "The request may have run and been charged. Resending starts a new run and may charge you again.";
+const throttles = new Set(["throttle_mixture_concurrency_exhausted", "throttle_workspace_rate_limited"]);
+
+// Pi 1.5.2 classifies display text for retry and automatic overflow recovery.
+// Machine-readable details are kept independently of that display policy.
+export function describeError(status, data, headers, canDisplay = () => true) {
   const code = codes.has(data?.error?.code) ? data.error.code : undefined;
   const param = safeParam(data?.error?.param);
   const panda = settlement(code, data?.panda);
-  const id = asId(headers.get("x-panda-request-id"), runId) ?? asId(headers.get("x-panda-request-id"), requestId) ?? panda?.request_id ?? panda?.run_id;
-  const marked = headers.get("idempotency-replayed")?.toLowerCase() === "true" || data?.panda?.replay === true;
-  const admitted = data?.panda != null || headers.has("x-panda-request-id");
-  const zero = panda?.charge?.minor_units === "0" && panda.held?.minor_units === "0";
-  const positive = panda?.charge != null && panda.charge.minor_units !== "0";
-  let action = "same";
-  let message = "Panda returned HTTP " + status + (code ? " (" + code + ")" : "") + ".";
-  if (code === "context_length_exceeded") message += " The request exceeds the maximum context length.";
-  if (param) message += " Parameter: " + param + ".";
+  const header = headers.get("x-panda-request-id");
+  const id = asId(header, runId) ?? asId(header, requestId) ?? panda?.request_id ?? panda?.run_id;
+  const replay = headers.get("idempotency-replayed")?.toLowerCase() === "true" || panda?.replay === true;
+  if (panda && !panda.run_id && asId(header, runId)) panda.run_id = header;
+  if (panda && replay) panda.replay = true;
+  const throttle = status === 429 && throttles.has(code) && !replay && !data?.panda && !header;
+  const retry = throttle && headers.get("x-should-retry")?.trim().toLowerCase() !== "false";
+  const details = { status, ...(code && { code }), ...(param && { param }), ...(id && { requestId: id }),
+    ...(panda && { panda }), ...(replay && { replay: true }) };
+  let message = "Panda declined this request.";
   if (code === "mixture_idempotency_conflict") {
-    action = "terminal";
-    message += " The request changed after its first attempt. The original settlement is unknown.";
-  } else if (code === "mixture_already_running") {
-    action = "terminal";
-    message += " The earlier identical request is still running. Its charge is pending and may be zero. Its answer cannot be recovered. Submitting again starts a separate, potentially billable run.";
-  } else if (code === "mixture_already_completed" || code === "mixture_already_partial") {
-    action = "terminal";
-    message += " The earlier request finished. Its answer cannot be recovered. " + moneyText(panda?.charge) + " Submitting again starts a separate run.";
-  } else if (positive || ["failed", "partial", "completed"].includes(data?.panda?.status) || code === "mixture_already_failed" ||
-             unsuccessful.has(code) || (admitted && !uncertain.has(code) && !marked)) {
-    action = zero ? "fresh" : "terminal";
-    message += " " + moneyText(panda?.charge);
-  } else if (!admitted && !marked && beforeAdmission.get(status)?.includes(code)) {
-    action = "fresh";
-  } else if (zero && panda.status !== "running") {
-    action = "fresh";
-    message += " " + moneyText(panda.charge);
+    message += " The request differs from the one previously submitted with this key. The original settlement is unknown. " + unknownOutcome;
+  } else if (code === "mixture_already_running" || panda?.status === "running") {
+    message += " The earlier identical request is still running. Its charge is pending and may be zero. Its answer cannot be recovered. Resending starts a separate, potentially billable run.";
+  } else if (code === "context_length_exceeded" || code === "inference_request_too_large") {
+    message += " The input exceeds Panda's admission limit. Shorten the conversation or compact it before submitting again.";
+  } else if (panda || code?.startsWith("mixture_already_")) {
+    if (replay || code?.startsWith("mixture_already_")) message += " The earlier request finished. Its answer cannot be recovered.";
+    const amount = moneyText(panda?.charge);
+    message += " " + (!panda?.charge || canDisplay(amount) ? amount : "The reported charge in USD is " + "USD" + (Number(panda.charge.minor_units) / 100).toFixed(2) + ".");
+    message += panda?.charge ? " Resending starts a new run with its own charge." : " " + unknownOutcome;
+  } else if (status >= 500 || status === 200 || status === 408 || replay || header || !code ||
+             ["request_invalid", "authority_revoked", "input_too_large"].includes(code)) {
+    message += " " + unknownOutcome;
+  } else if (throttle) {
+    message += " Panda could not admit the request within the permitted wait.";
   }
-  if (id) message += " Panda request ID: " + id + ".";
-  const cleanHeaders = { "content-type": "application/json" };
-  if (id) cleanHeaders["x-panda-request-id"] = id;
-  if (marked) cleanHeaders["idempotency-replayed"] = "true";
-  const veto = headers.get("x-should-retry");
-  if (action === "terminal" || veto === "false") cleanHeaders["x-should-retry"] = "false";
-  const delay = headers.get("retry-after");
-  if (delay && /^\d{1,3}$/.test(delay) && Number(delay) <= 600) cleanHeaders["retry-after"] = delay;
-  const error = { message, code: code ?? "panda_request_error", param };
-  return { action, message, status, headers: cleanHeaders, details: { code, param, requestId: id }, body: JSON.stringify({ error, ...(panda && { panda }) }) };
+  for (const part of [code && "Code: " + code + ".", param && "Parameter: " + param + ".", id && "Panda request ID: " + id + "."]) {
+    if (part && canDisplay(message + " " + part)) message += " " + part;
+  }
+  return { message, details, retry };
 }
 
-export function errorResponse(error) {
-  return new Response(error.body, { status: error.status, headers: error.headers });
-}
-
-// The SDK consumes SSE error frames before its native chunk callback. Observe bounded
-// complete frames in transit so the session can retain a safe code and settlement.
-export function observeStreamErrors(response, report) {
-  if (!response.body || !response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) return response;
-  let pieces = [], size = 0, lineLength = 0, last = 0;
-  const limit = 16_384;
-  function append(piece) {
-    size += piece.length;
-    if (size <= limit && piece.length) pieces.push(piece);
-    else if (size > limit) pieces = [];
-  }
-  function frame() {
-    if (size <= limit) {
-      const text = Buffer.concat(pieces, size).toString("utf8");
-      const data = text.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
-      if (data.includes('"error"')) {
-        try { const obj = JSON.parse(data); if (obj?.error && !obj.choices) report(obj); } catch { /* Native parser reports malformed frames. */ }
-      }
-    }
-    pieces = []; size = 0;
-  }
-  const body = response.body.pipeThrough(new TransformStream({
-    transform(chunk, controller) {
-      let start = 0;
-      for (let i = 0; i < chunk.length; i++) {
-        const byte = chunk[i];
-        if (byte === 10) {
-          append(chunk.subarray(start, i + 1));
-          if (lineLength === 0 || (lineLength === 1 && last === 13)) frame();
-          lineLength = 0;
-          start = i + 1;
-        } else { lineLength++; }
-        last = byte;
-      }
-      append(chunk.subarray(start));
-      controller.enqueue(chunk);
-    },
-  }));
-  return new Response(body, { status: response.status, headers: response.headers });
+export function retryWait(value, attempt, now = Date.now()) {
+  if (value === null) return 250 * 2 ** attempt;
+  const milliseconds = /^\d+$/.test(value) ? Number(value) * 1000 :
+    /^[A-Z][a-z]{2}, .+ GMT$/.test(value) ? Date.parse(value) - now : NaN;
+  return Number.isFinite(milliseconds) ? Math.max(0, milliseconds) : Infinity;
 }

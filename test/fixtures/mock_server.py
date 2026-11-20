@@ -48,10 +48,10 @@ class Recorder:
             if key is not None and key in self.runs:
                 run = self.runs[key]
                 return ("replay" if run["request"] == request else "conflict"), dict(run)
-            faults = {"prehold", "definite", "definite_proxy", "drop_running", "drop_completed",
+            faults = {"prehold", "concurrency", "funding", "server_500", "upstream", "interrupted", "definite", "definite_proxy", "drop_running", "drop_completed",
                       "drop_partial", "cut_200", "unknown", "panel_failed_paid", "panel_failed_unknown", "panel_failed_zero"}
             fault = scenario if self.chat_count == 1 and scenario in faults else None
-            if fault == "prehold":
+            if fault in ("prehold", "concurrency", "funding"):
                 return fault, None
             status = {"definite": "failed", "definite_proxy": "failed", "drop_partial": "partial",
                       "drop_running": "running"}.get(fault, "completed" if fault else "running")
@@ -194,10 +194,14 @@ class Handler(BaseHTTPRequestHandler):
         else:
             status, code = {"prehold": (429, "throttle_workspace_rate_limited"), "definite": (503, "model_unavailable"),
                             "definite_proxy": (503, "model_unavailable"),
-                            "unknown": (503, "outcome_unknown"), "conflict": (409, "mixture_idempotency_conflict")}[action]
+                            "unknown": (503, "outcome_unknown"), "conflict": (409, "mixture_idempotency_conflict"),
+                            "concurrency": (429, "throttle_mixture_concurrency_exhausted"),
+                            "funding": (429, "throttle_commercial_balance_source_bound_exceeded"),
+                            "server_500": (500, "internal_error"), "upstream": (503, "inference_upstream_unavailable"),
+                            "interrupted": (503, "interrupted")}[action]
             if action in ("definite", "definite_proxy"):
                 receipt = self.settlement(run)
-            if action == "prehold":
+            if action in ("prehold", "concurrency"):
                 response_headers["Retry-After"] = "0"
             elif action != "definite_proxy":
                 response_headers["x-should-retry"] = "false"
@@ -239,6 +243,11 @@ class Handler(BaseHTTPRequestHandler):
             status, content_type = 200, "application/json"
             if self.command == "GET" and route == "/v1/models":
                 record.update(response_mode="models")
+                if state.scenario == "discovery-401":
+                    record.update(response_status=401)
+                    self.reply(401, "application/json", compact({"error": {"code": "inference_token_invalid",
+                        "message": "private-marker-token"}}).encode())
+                    return
                 result = {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "mock"} for m in MODELS]}
                 payload = compact(result).encode()
             elif self.command == "POST" and route == "/v1/chat/completions" and isinstance(body, dict):
@@ -266,9 +275,31 @@ class Handler(BaseHTTPRequestHandler):
                     base["object"] = "chat.completion.chunk"
                     if "tool_calls" in delta:
                         delta = {"tool_calls": [dict(index=0, **delta["tool_calls"][0])]}
+                    if mode in ("settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"):
+                        delta = {"content": "The paid partial answer."} if mode != "content-filter" else {}
+                        reason = {"content-filter": "content_filter", "settled-cut": "stop"}.get(mode, "length")
                     choices = [{"index": 0, "delta": d, "finish_reason": end} for d, end in
                                [({"role": "assistant"}, None), (delta, None), ({}, reason)]]
                     chunks = [dict(base, choices=[c]) for c in choices]
+                    if mode in ("settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"):
+                        state.recorder.settle(admitted, "completed")
+                        admitted["cents"] = 0 if mode == "content-filter" else 3
+                        chunks[-1]["panda"] = dict(self.settlement(admitted), mode="single")
+                        if mode == "content-filter":
+                            chunks[-1]["panda"]["status"] = "failed"
+                        else:
+                            partial = "".join("data: " + compact(chunk) + "\n\n" for chunk in chunks).encode()
+                            record.update(response_status=200, receipt=chunks[-1]["panda"])
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/event-stream")
+                            self.send_header("Content-Length", str(len(partial) + 4096))
+                            self.end_headers()
+                            self.wfile.write(partial)
+                            self.wfile.flush()
+                            time.sleep(0.035)
+                            self.close_connection = True
+                            self.connection.shutdown(socket.SHUT_RDWR)
+                            return
                     if mode == "usage":
                         def call(tokens):
                             return {"usage": {"input_tokens": tokens, "output_tokens": 15, "cached_input_tokens": 1200}}
@@ -280,10 +311,11 @@ class Handler(BaseHTTPRequestHandler):
                     payload = ("".join("data: " + compact(chunk) + "\n\n" for chunk in chunks) +
                                "data: [DONE]\n\n").encode("utf-8")
                     if mode == "malformed":
-                        payload = b"data: {private-marker-invalid-json\n\n"
+                        payload = ("data: " + compact(chunks[1]) + "\n\ndata: {private-marker-invalid-json\n\n").encode()
                     elif mode == "stream-error":
-                        error = {"error": {"code": "answer_invalid", "message": "private-marker-server-error"}}
-                        payload = ("data: " + compact(error) + "\n\n").encode()
+                        error = {"error": {"code": "answer_invalid", "message": "private-marker-server-error",
+                                           "metadata": {"raw": "private-marker-body"}}}
+                        payload = ("data: " + compact(chunks[1]) + "\n\ndata: " + compact(error) + "\n\n").encode()
                 else:
                     base["object"] = "chat.completion"
                     msg = dict({"role": "assistant", "content": None}, **delta)

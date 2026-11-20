@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { catalog } from "../src/catalog.js";
 import { responseUsage } from "../src/usage.js";
-import { pandaStream, createRequestKeys } from "../src/request.js";
+import { pandaStream } from "../src/request.js";
 
 const count = (input_tokens,output_tokens) => ({ usage:{ input_tokens,output_tokens,cached_input_tokens:100 } });
 const base = { content:[{type:"text",text:"abcd"}], usage:{input:220000,output:45,cacheRead:5000,cacheWrite:0,
@@ -38,7 +38,7 @@ test("Panel transport honors explicit short and long timeouts and a ten-minute s
     const stream=pandaStream((_m,_c,options)=>{
       timeout=options.timeoutMs;
       return {result:async()=>({stopReason:"stop"})};
-    },createRequestKeys(),()=>{});
+    },()=>{});
     await stream({id:"panel:panda"},{},{timeoutMs:given}).result();
     assert.equal(timeout,expected);
   }
@@ -50,6 +50,6 @@ test("the user guide states the authorization, compaction and settlement rules",
   assert.deepEqual(rows.map(([, id, window]) => [id, Number(window.replaceAll(",", ""))]),
     catalog.map(model => [model.id, model.contextWindow]));
   for (const text of ["token saved by `/login` takes precedence over `PANDA_API_TOKEN`", "`/logout`",
-    "187,000", "170,616", "up to three", "3/2", "once per run", "pending and may be zero",
+    "187,000", "170,616", "1,022 caller messages", "auto:cost` can fall back to Gemma", "total wait budget of 60 seconds", "up to three", "3/2", "once per run", "pending and may be zero",
     "ADR 0079 slice C", "httpIdleTimeoutMs", "retry.provider.timeoutMs"]) assert.ok(guide.includes(text), text);
 });

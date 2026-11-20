@@ -3,8 +3,10 @@ import { resolve } from "node:path";
 
 export default function referenceFixture(pi) {
   if (process.env.PANDA_FIXTURE_CHANGE_REPLAY === "1") {
-    let requests = 0;
-    pi.on("before_provider_request", ({ payload }) => ({ ...payload, temperature: ++requests === 1 ? 0.2 : 0.3 }));
+    pi.on("context", event => ({ messages: event.messages.map(message => message.role === "user" ? {
+      ...message, content: typeof message.content === "string" ? message.content + " Transformed fixture." :
+        [...message.content, { type: "text", text: "Transformed fixture." }],
+    } : message) }));
   }
   pi.registerTool({
     name: "panda_fixture_read",
