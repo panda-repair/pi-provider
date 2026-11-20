@@ -20,7 +20,11 @@ function rig() {
   return { provider, refresh, requests, key: value => { key = value; }, respond: fn => { response = fn; } };
 }
 
-test("the seven allowed, text-only models use the Panda adapter and positive provisional budgets", () => {
+test("the seven allowed, text-only models use the Panda adapter and their per-selector compaction windows", () => {
+  const windows = {
+    "glm-5.3": 262_144, "deepseek-v4.1-flash": 262_144, "auto:cost": 262_144,
+    "panel:panda": 225_280, "panel:panda-quality": 225_280, auto: 225_280, "auto:quality": 187_392,
+  };
   assert.deepEqual(catalog.map(model => model.id), ids);
   const models = permittedModels([...ids.map(id => ({ id })), { id: "auto" }, { id: "unknown" }], baseUrl);
   assert.deepEqual(models.map(model => model.id), ids);
@@ -30,7 +34,8 @@ test("the seven allowed, text-only models use the Panda adapter and positive pro
     assert.equal(model.baseUrl, baseUrl);
     assert.deepEqual(model.input, ["text"]);
     assert.equal(model.reasoning, false);
-    assert.ok(model.maxTokens > 0 && model.maxTokens < model.contextWindow);
+    assert.equal(model.contextWindow, windows[model.id], model.id);
+    assert.equal(model.maxTokens, 16_384, model.id);
     assert.deepEqual(model.compat, {
       supportsStore: false, supportsReasoningEffort: false, promptCacheKeyMode: "disabled",
       supportsLongCacheRetention: false, supportsDeveloperRole: true, supportsUsageInStreaming: true,

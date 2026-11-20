@@ -34,6 +34,39 @@ function clean(schema, tool = "read") {
     model).tools[0].function.parameters;
 }
 
+test("all canonical root dialect URIs normalize, and other markers fail before transport", async () => {
+  const definition = { type: "string", description: "original" };
+  const parameters = { $defs: { field: definition }, type: "object",
+    properties: { value: { $ref: "#/$defs/field", description: "annotation" } } };
+  for (const scheme of ["http", "https"]) {
+    for (const fragment of ["", "#"]) {
+      for (const path of ["draft/2020-12", "draft/2019-09", "draft-07"]) {
+        const uri = scheme + "://json-schema.org/" + path + "/schema" + fragment;
+        const out = clean({ ...parameters, $schema: uri });
+        assert.deepEqual(out, { type: "object", properties: {
+          value: { ...definition, description: path === "draft-07" ? "original" : "annotation" },
+        } }, uri);
+      }
+    }
+  }
+  const invalid = [null, 7, {}, "json-schema.org/draft-07/schema", "HTTPS://json-schema.org/draft-07/schema",
+    "https://example.test/draft-07/schema", "https://json-schema.org/draft-07/schema#other",
+    "https://json-schema.org/draft-07/schema##", "https://json-schema.org/draft-07/schema/"];
+  for (const scheme of ["http", "https"]) {
+    for (const path of ["draft-04", "draft-06"]) {
+      for (const fragment of ["", "#"]) invalid.push(scheme + "://json-schema.org/" + path + "/schema" + fragment);
+    }
+  }
+  let sends = 0;
+  const invoke = pandaStream(fakeNative, createRequestKeys(), () => {});
+  for (const marker of invalid) {
+    const tools = [{ type: "function", function: { name: "read", parameters: { ...parameters, $schema: marker } } }];
+    const stream = invoke(model, { body: { tools } }, { apiKey: "pnd_it_fixture", fetch: async () => { sends++; return new Response(); } });
+    await assert.rejects(stream.result(), /unsupported root JSON Schema dialect/);
+  }
+  assert.equal(sends, 0);
+});
+
 test("modern and legacy root references follow each dialect's annotation rules", () => {
   const uri = "https://json-schema.org/draft/2020-12/schema";
   const examples = [{ $schema: "literal", $ref: "literal" }];

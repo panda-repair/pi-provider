@@ -184,11 +184,30 @@ def main():
                 if fault == "drop_running":
                     summary["faults"][label]["receipt"] = {k: receipt[k] for k in ("status", "charge", "held")}
         env.pop("PANDA_FIXTURE_CHANGE_REPLAY")
-        chat, _, marker, result, _ = capture("local-references", model, extension=True)
-        fn = next(t["function"] for t in chat[0]["body"]["tools"] if t["function"]["name"] == "panda_fixture_read")
-        assert fn["parameters"] == {"type": "object", "properties": {"path": {"type": "string", "description": "Local fixture path"}}, "required": ["path"]}
-        assert marker in result.stdout and any(m["role"] == "tool" and marker in str(m["content"]) for m in chat[1]["body"]["messages"])
-        summary["localReferences"] = {"tool": fn["name"], "wireParameters": fn["parameters"], "markerRoundTrip": True}
+        summary["rootDialects"] = {}
+        dialects = {"local-references": "", "2020-12": "https://json-schema.org/draft/2020-12/schema",
+                    "2019-09": "http://json-schema.org/draft/2019-09/schema#", "draft-07": "http://json-schema.org/draft-07/schema#",
+                    "draft-04": "http://json-schema.org/draft-04/schema#", "draft-06": "https://json-schema.org/draft-06/schema",
+                    "custom": "urn:fixture:unsupported"}
+        for label, uri in dialects.items():
+            env["PANDA_FIXTURE_DIALECT"] = uri
+            accepted = label not in ("draft-04", "draft-06", "custom")
+            chat, _, marker, result, _ = capture(label, model, extension=True, expect=0 if accepted else 1)
+            if accepted:
+                assert len(chat) == 2, label
+                for post in chat:
+                    fn = next(t["function"] for t in post["body"]["tools"] if t["function"]["name"] == "panda_fixture_read")
+                    path = {"type": "string"}
+                    if label != "draft-07":
+                        path["description"] = "Local fixture path"
+                    assert fn["parameters"] == {"type": "object", "properties": {"path": path}, "required": ["path"]}, label
+                assert marker in result.stdout and any(m["role"] == "tool" and marker in str(m["content"]) for m in chat[1]["body"]["messages"])
+                if not uri:
+                    summary["localReferences"] = {"tool": fn["name"], "wireParameters": fn["parameters"], "markerRoundTrip": True}
+            else:
+                assert not chat and "unsupported root JSON Schema dialect" in result.stderr, label
+            if uri:
+                summary["rootDialects"][label] = {"uri": uri, "chatPosts": len(chat), "exit": result.returncode}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
 

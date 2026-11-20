@@ -11,6 +11,7 @@ export default function referenceFixture(pi) {
     label: "Read fixture",
     description: "Read the single integration fixture.",
     parameters: {
+      ...(process.env.PANDA_FIXTURE_DIALECT ? { $schema: process.env.PANDA_FIXTURE_DIALECT } : {}),
       type: "object", $defs: { "file/path": { $ref: "#/definitions/path" } },
       definitions: { path: { type: "string" } },
       properties: { path: { $ref: "#/$defs/file~1path", description: "Local fixture path" } },

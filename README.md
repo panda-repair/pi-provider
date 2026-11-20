@@ -25,19 +25,21 @@ Requests go to `https://app.panda.repair/v1` by default. For staging, set `PANDA
 
 Use the complete selector, including `panda/` and any colon. All seven accept text and function tools. Pi executes the selected tool locally and sends its result in the next request. The package accepts text input only and exposes no adjustable thinking level. With tools enabled, each `auto` selector picks the first option your token permits from its row, before the selected model or Panel runs.
 
-| Pi selector | With tools enabled |
-| --- | --- |
-| `panda/glm-5.3` | Call GLM-5.3 directly. |
-| `panda/deepseek-v4.1-flash` | Call DeepSeek V4.1 Flash directly. |
-| `panda/auto` | Panda Panel → GLM → DeepSeek. |
-| `panda/auto:cost` | DeepSeek → GLM. |
-| `panda/auto:quality` | Quality Panel → GLM → Panda Panel → DeepSeek. |
-| `panda/panel:panda` | DeepSeek and Gemini 3.8 Flash suggest a response. DeepSeek synthesizes it and chooses any tool call. |
-| `panda/panel:panda-quality` | The same two members contribute. GLM-5.3 synthesizes their responses and chooses any tool call. |
+| Pi selector | Pi context window (tokens) | With tools enabled |
+| --- | ---: | --- |
+| `panda/glm-5.3` | 262,144 | Call GLM-5.3 directly. |
+| `panda/deepseek-v4.1-flash` | 262,144 | Call DeepSeek V4.1 Flash directly. |
+| `panda/auto` | 225,280 | Panda Panel → GLM → DeepSeek. |
+| `panda/auto:cost` | 262,144 | DeepSeek → GLM. |
+| `panda/auto:quality` | 187,392 | Quality Panel → GLM → Panda Panel → DeepSeek. |
+| `panda/panel:panda` | 225,280 | DeepSeek and Gemini 3.8 Flash suggest a response. DeepSeek synthesizes it and chooses any tool call. |
+| `panda/panel:panda-quality` | 225,280 | The same two members contribute. GLM-5.3 synthesizes their responses and chooses any tool call. |
 
 ## Limits and billing
 
-Pi currently budgets 32,768 context tokens and up to 16,384 output tokens for each selector. These are provisional client limits pending Panda's per-model rollout. Panda allows up to 131,072 UTF-8 bytes for conversation text, tool arguments and results, and 16,384 bytes for instructions. It accepts up to 128 messages overall. A multi-member Panel with tools accepts up to 126 after combining initial instructions. Large file reads and long tool histories can reach these limits before Pi's token estimate. [Model limits and rates](src/catalog.js)
+All seven selectors allow up to **16,384 output tokens**. With automatic compaction enabled, Pi 1.5.2 summarizes older turns when its context estimate exceeds the selected window minus `compaction.reserveTokens` (16,384 by default). For `panda/auto:quality`, the default threshold is 171,008 tokens. Pi uses reported usage when available and estimates uncounted text by dividing its JavaScript string length by four. [Model limits and rates](src/catalog.js)
+
+The windows are planning estimates for coding text, using roughly four rendered bytes per Pi token. Panda's target admission rules in ADR 0079 D5/D7 count framed UTF-8 input bytes and reserve the requested output. Panels also need room for synthesis, and a route can reach the US$5.25 per-run hold cap. Tool definitions, instructions, text encoding and the route available to your token can bring the server limit forward. Recheck the estimates against production at publication.
 
 For the two named models, Pi estimates cost from Panda's per-million-token ceiling, including separate cache-read rates. The five routed selectors have no fixed price. Pi displays a zero cost for them, while Panda charges for the route that answered. Panels can charge for several model calls. Panda's settlement includes a one-cent minimum when anything answers. Consult Panda's usage and billing for the actual charge. [Panda pricing](https://panda.repair/pricing#pricing-llm-api)
 
@@ -45,9 +47,13 @@ If Pi retries a dropped connection, an interrupted stream or an error with an un
 
 After a lost response, Panda can return an HTTP 409 replay receipt. If the earlier identical request is still running, Pi stops. That request will be charged when it completes, its answer cannot be recovered, and resubmitting starts and charges a second run. If the receipt says the earlier run finished or partially completed, Pi reports that it was charged and its reply was lost.
 
-Pi's standard tools work with Panda's function-calling API. In a custom tool's parameter schema, `#/$defs/Name` and `#/definitions/Name` resolve to definitions at that tool's root. The package expands acyclic references locally, up to 32 levels and 65,536 bytes of copies across the request. The expanded declarations must also fit the tools byte limit. Remote, missing and cyclic targets produce a local error. Panda validates its documented schema subset, and `strict: true` can reject additional keywords. [Tool calling in the Panda API guide](https://panda.repair/products/llm-api#llm-api-agents-notes)
+## Custom tool schemas
 
-The root may declare JSON Schema 2020-12, 2019-09 or draft-07. Modern and unmarked schemas apply annotation siblings such as `description` or `default` over the referenced definition. Draft-07 ignores those annotations. Put validation constraints in the definition itself. Names in `properties` and values in `const`, `enum`, `default` and `examples` keep their original meaning.
+The package accepts a root `$schema` for JSON Schema **2020-12**, **2019-09** or **draft-07**. Use `json-schema.org/draft/2020-12/schema`, `json-schema.org/draft/2019-09/schema` or `json-schema.org/draft-07/schema` with an `http://` or `https://` prefix. Each also accepts a single trailing `#`. The package strips the marker before sending the tool to Panda. Draft-04, draft-06, unknown dialects and a marker below the schema root fail locally before chat dispatch.
+
+Local references of the form `#/$defs/Name` and `#/definitions/Name` resolve within each tool. Modern and unmarked schemas apply annotation siblings such as `description` or `default` over the definition. Draft-07 ignores those annotations. Put validation constraints in the definition. Property names and literal values in `const`, `enum`, `default` and `examples` retain their meaning.
+
+The package expands acyclic references up to 32 levels and 65,536 bytes of copies across the request. When references expand, the written-out tool list must also fit this client-side byte limit. Remote, missing and cyclic targets produce a local error. Panda checks its documented schema subset, and `strict: true` can reject additional keywords. [Tool calling in the Panda API guide](https://panda.repair/products/llm-api#llm-api-agents-notes)
 
 ## Where your data goes
 
