@@ -1,4 +1,5 @@
 {
+  "package": "@panda-repair/pi-provider@0.1.0",
   "versions": {
     "pi_cli": "1.5.2",
     "pi_ai": "1.5.2",
@@ -7,117 +8,421 @@
     "node": "v24.21.0",
     "npm": "11.19.0"
   },
-  "contractRevision": "cb676cac",
-  "environment": "Loopback-only macOS sandbox; synthetic inference credentials",
-  "localPathInstall": {
-    "glm-5.3": {
-      "discovery": 1,
-      "chat": 2,
-      "contractViolations": 0,
-      "markerInToolResultAndFinalOutput": true
-    },
-    "deepseek-v4.1-flash": {
-      "discovery": 1,
-      "chat": 2,
-      "contractViolations": 0,
-      "markerInToolResultAndFinalOutput": true
-    },
-    "auto": {
-      "discovery": 1,
-      "chat": 2,
-      "contractViolations": 0,
-      "markerInToolResultAndFinalOutput": true
-    },
-    "auto:cost": {
-      "discovery": 1,
-      "chat": 2,
-      "contractViolations": 0,
-      "markerInToolResultAndFinalOutput": true
-    },
-    "auto:quality": {
-      "discovery": 1,
-      "chat": 2,
-      "contractViolations": 0,
-      "markerInToolResultAndFinalOutput": true
-    },
-    "panel:panda": {
-      "discovery": 1,
-      "chat": 2,
-      "contractViolations": 0,
-      "markerInToolResultAndFinalOutput": true
-    },
-    "panel:panda-quality": {
-      "discovery": 1,
-      "chat": 2,
-      "contractViolations": 0,
-      "markerInToolResultAndFinalOutput": true
-    }
-  },
-  "independentWireChecks": {
-    "scenarios": 21,
-    "getModels": 25,
-    "chatPosts": 27,
-    "requests": 52,
+  "scope": "Loopback-only macOS sandbox. Synthetic model results, inference tokens, run admissions and charges.",
+  "apiContractRevision": "cb676cac",
+  "schemaReferenceRevision": "beea6489f393d24bb08c602c4cc6e8eee0b5834b",
+  "repoIntegration": {
+    "scenarios": 19,
+    "getModels": 19,
+    "chatPosts": 42,
     "contractViolations": 0,
-    "transportAndAgentRetry": {
-      "glm-5-3-retry": {
-        "status": 503,
-        "byte_identical_body": true,
-        "same_key": true,
-        "new_key_after_tool": true
+    "models": {
+      "glm-5.3": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
       },
-      "dropped-connection": {
-        "status": "connection closed before response",
-        "byte_identical_body": true,
-        "same_key": true,
-        "new_key_after_tool": true
+      "deepseek-v4.1-flash": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
       },
-      "provider-retry": {
-        "status": 503,
-        "byte_identical_body": true,
-        "same_key": true,
-        "new_key_after_tool": true
+      "auto": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      },
+      "auto:cost": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      },
+      "auto:quality": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      },
+      "panel:panda": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      },
+      "panel:panda-quality": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
       }
     },
-    "newSessionWithIdenticalRequest": {
-      "sameBody": true,
-      "differentKey": true
-    },
-    "changedBodyAfterDisconnect": {
-      "temperatures": [
-        0.2,
-        0.3
-      ],
-      "distinctKeyCount": 1,
-      "replayHttpStatus": 409,
-      "piExit": 1
-    },
-    "sameProcessCatalogSizes": [
-      7,
-      2,
-      0
-    ],
-    "explicitIds": {
-      "denied-selector": {
-        "selector": "panda/auto:quality",
-        "exit": 1,
-        "chatPosts": 0
+    "retryCases": {
+      "agent-definite": {
+        "http": [
+          503,
+          200,
+          200
+        ],
+        "distinctKeys": 3,
+        "codes": [
+          "model_unavailable",
+          null,
+          null
+        ],
+        "recordedRuns": 3,
+        "chargedFixtureRuns": 2,
+        "exit": 0,
+        "contractViolations": 0
       },
-      "denied-unknown": {
-        "selector": "panda/fixture-unknown",
+      "agent-prehold": {
+        "http": [
+          429,
+          200,
+          200
+        ],
+        "distinctKeys": 3,
+        "codes": [
+          "throttle_workspace_rate_limited",
+          null,
+          null
+        ],
+        "recordedRuns": 2,
+        "chargedFixtureRuns": 2,
+        "exit": 0,
+        "contractViolations": 0
+      },
+      "agent-drop_completed": {
+        "http": [
+          null,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          null,
+          "mixture_already_completed"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 1,
         "exit": 1,
-        "chatPosts": 0
+        "contractViolations": 0
+      },
+      "agent-drop_partial": {
+        "http": [
+          null,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          null,
+          "mixture_already_partial"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 1,
+        "exit": 1,
+        "contractViolations": 0
+      },
+      "agent-unknown": {
+        "http": [
+          503,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          "outcome_unknown",
+          "mixture_already_completed"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 1,
+        "exit": 1,
+        "contractViolations": 0
+      },
+      "agent-cut_200": {
+        "http": [
+          200,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          null,
+          "mixture_already_completed"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 1,
+        "exit": 1,
+        "contractViolations": 0
+      },
+      "agent-changed_body": {
+        "http": [
+          null,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          null,
+          "mixture_idempotency_conflict"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 1,
+        "exit": 1,
+        "contractViolations": 0
+      },
+      "transport-definite": {
+        "http": [
+          503,
+          200,
+          200
+        ],
+        "distinctKeys": 3,
+        "codes": [
+          "model_unavailable",
+          null,
+          null
+        ],
+        "recordedRuns": 3,
+        "chargedFixtureRuns": 2,
+        "exit": 0,
+        "contractViolations": 0
+      },
+      "transport-prehold": {
+        "http": [
+          429,
+          200,
+          200
+        ],
+        "distinctKeys": 3,
+        "codes": [
+          "throttle_workspace_rate_limited",
+          null,
+          null
+        ],
+        "recordedRuns": 2,
+        "chargedFixtureRuns": 2,
+        "exit": 0,
+        "contractViolations": 0
+      },
+      "transport-drop_completed": {
+        "http": [
+          null,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          null,
+          "mixture_already_completed"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 1,
+        "exit": 1,
+        "contractViolations": 0
+      },
+      "transport-drop_partial": {
+        "http": [
+          null,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          null,
+          "mixture_already_partial"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 1,
+        "exit": 1,
+        "contractViolations": 0
+      }
+    },
+    "localReferences": {
+      "tool": "panda_fixture_read",
+      "wireParameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Local fixture path"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "markerRoundTrip": true
+    },
+    "mockLedger": {
+      "unkeyedRequestsIndependent": true,
+      "pendingReplay": true,
+      "ignoredFields": [
+        "seed",
+        "user"
+      ],
+      "changedTemperatureConflict": true,
+      "settledReplay": true
+    }
+  },
+  "independentIntegration": {
+    "scenarios": 40,
+    "requests": 124,
+    "routes": {
+      "GET /v1/models": 40,
+      "POST /v1/chat/completions": 84
+    },
+    "contractViolations": 0,
+    "directSchemaChecks": 24,
+    "selectedOutcomes": {
+      "actual-client-timeout": {
+        "attempts": 2,
+        "keyGroups": [
+          1,
+          1
+        ],
+        "http": [
+          null,
+          409
+        ],
+        "codes": [
+          null,
+          "mixture_already_completed"
+        ],
+        "admissions": 1,
+        "chargeMinorUnits": 3,
+        "exit": 1
+      },
+      "agent-cut-200": {
+        "attempts": 2,
+        "keyGroups": [
+          1,
+          1
+        ],
+        "http": [
+          200,
+          409
+        ],
+        "codes": [
+          null,
+          "mixture_already_partial"
+        ],
+        "admissions": 1,
+        "chargeMinorUnits": 3,
+        "exit": 1
+      },
+      "agent-definite-503": {
+        "attempts": 3,
+        "keyGroups": [
+          1,
+          2,
+          3
+        ],
+        "http": [
+          503,
+          200,
+          200
+        ],
+        "codes": [
+          "model_unavailable",
+          null,
+          null
+        ],
+        "admissions": 3,
+        "chargeMinorUnits": 6,
+        "exit": 0
+      },
+      "agent-lost-completed": {
+        "attempts": 2,
+        "keyGroups": [
+          1,
+          1
+        ],
+        "http": [
+          null,
+          409
+        ],
+        "codes": [
+          null,
+          "mixture_already_completed"
+        ],
+        "admissions": 1,
+        "chargeMinorUnits": 3,
+        "exit": 1
+      },
+      "agent-lost-partial": {
+        "attempts": 2,
+        "keyGroups": [
+          1,
+          1
+        ],
+        "http": [
+          null,
+          409
+        ],
+        "codes": [
+          null,
+          "mixture_already_partial"
+        ],
+        "admissions": 1,
+        "chargeMinorUnits": 3,
+        "exit": 1
+      },
+      "marked-untyped-409": {
+        "attempts": 3,
+        "keyGroups": [
+          1,
+          1,
+          1
+        ],
+        "http": [
+          null,
+          409,
+          409
+        ],
+        "codes": [
+          null,
+          null,
+          "mixture_already_completed"
+        ],
+        "admissions": 1,
+        "chargeMinorUnits": 3,
+        "exit": 1
+      },
+      "unmarked-untyped-409": {
+        "attempts": 3,
+        "keyGroups": [
+          1,
+          2,
+          3
+        ],
+        "http": [
+          409,
+          200,
+          200
+        ],
+        "codes": [
+          null,
+          null,
+          null
+        ],
+        "admissions": 3,
+        "chargeMinorUnits": 6,
+        "exit": 0
       }
     }
   },
-  "otherProviderControl": {
-    "sameWireModel": "glm-5.3",
-    "posts": 2,
-    "retainedStore": true,
-    "withoutPandaIdempotencyKey": true
+  "schemaComparison": {
+    "inputs": 104,
+    "upstreamUnitInputs": 49,
+    "upstreamApiFixtures": 8,
+    "additionalCases": 47,
+    "matchingNormalizationResults": 101,
+    "mismatchedAdmissionDecisions": 0,
+    "allInputsPreserved": true,
+    "inlineEquivalent": true,
+    "actualReadImageEquivalent": true
   },
   "pack": {
     "files": [
+      "LICENSE",
       "README.md",
       "index.js",
       "package.json",
@@ -126,16 +431,21 @@
       "src/request.js"
     ],
     "sourceSha256": {
-      "README.md": "a00035f736f9df5aaf5afb301497f3aa5f352b1ba11b070b482e275d5a402d00",
+      "LICENSE": "61f97aef30fe1f6f67e3fa62269c9889bb029e7452c5ea796512a27e38f069d4",
+      "README.md": "1a196c42499a4b84fe2f8fc64c5946881d58988504f815e29a3ad2ceab310e99",
       "index.js": "290c442c5571b7c53486a88ad20f61db1f946806d721ec00f8a764aa591792fa",
       "package.json": "ef8157232eec3d909ffef40eff54ddea605d02cf0b3b6f8e3770c1f4bdbdecc2",
       "src/catalog.js": "9498a6a01b0c194d6f97be6c4107e1cf78492902b6020784af6481cbdc4a0cb5",
       "src/provider.js": "4c0192191b7d7ee67ced29897ac0b6d4de447d5d7d33c93db04908cbb8e792eb",
-      "src/request.js": "e97a1f6871cf95444a66903328972e0b5f4f27139fb5179f1ac71b738ae09ff1"
+      "src/request.js": "0cdd3223f977b6eda61effd3d0da72d515f81abe253592693ec2c00fc27da5ce"
     },
-    "archiveSha256": "32aea86190d032d5853dfd09e1cb527fef5f92c0d6ae1380077579cbd132c025",
-    "freshInstallModel": "panda/panel:panda-quality",
-    "markerRoundTrip": true,
-    "contractViolations": 0
+    "archiveSha256": "c1027a91f8976acbad82b34f54af987e479116fdc5439935cb09638621c19932",
+    "packedBytes": 10577,
+    "unpackedBytes": 28288,
+    "licenseHolder": "Copyright (c) 2026 panda-repair",
+    "standardMitTermsMatched": true,
+    "freshInstallScenarios": 3,
+    "freshInstallRequests": 9,
+    "freshInstallContractViolations": 0
   }
 }

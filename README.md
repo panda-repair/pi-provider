@@ -41,12 +41,18 @@ Pi currently budgets 32,768 context tokens and up to 16,384 output tokens for ea
 
 For the two named models, Pi estimates cost from Panda's per-million-token ceiling, including separate cache-read rates. The five routed selectors have no fixed price. Pi displays a zero cost for them, while Panda charges for the route that answered. Panels can charge for several model calls. Panda's settlement includes a one-cent minimum when anything answers. Consult Panda's usage and billing for the actual charge. [Panda pricing](https://panda.repair/pricing#pricing-llm-api)
 
-The package sends an `Idempotency-Key` with each logical chat request and reuses it if Pi retries. The next tool turn gets a new key. After a lost response, Panda can return HTTP 409 with the original run's status and charge. The response text cannot be recovered from that receipt. Submitting the prompt again starts a new billable request.
+If Pi retries a dropped connection, an interrupted stream or an error with an unknown outcome, the package keeps the original `Idempotency-Key`. If Panda gives a definite error such as `model_unavailable`, Pi's next attempt uses a fresh key. A completed or partial replay returns HTTP 409. The package stops and reports that the earlier run was charged and its reply was lost. Submitting again will charge again. A normal tool follow-up or new prompt gets a fresh key.
 
-Pi's standard function tools work with Panda's JSON Schema subset. For a custom tool, inline any `$ref` in its parameter schema. An active reference or an unknown schema dialect produces a local error. Panda validates its documented subset, and `strict: true` can reject additional keywords. [Tool calling in the Panda API guide](https://panda.repair/products/llm-api#llm-api-agents-notes)
+Pi's standard tools work with Panda's function-calling API. In a custom tool's parameter schema, `#/$defs/Name` and `#/definitions/Name` resolve to definitions at that tool's root. The package expands acyclic references locally, up to 32 levels and 65,536 bytes of copies across the request. The expanded declarations must also fit the tools byte limit. Remote, missing and cyclic targets produce a local error. Panda validates its documented schema subset, and `strict: true` can reject additional keywords. [Tool calling in the Panda API guide](https://panda.repair/products/llm-api#llm-api-agents-notes)
+
+The root may declare JSON Schema 2020-12, 2019-09 or draft-07. Modern and unmarked schemas apply annotation siblings such as `description` or `default` over the referenced definition. Draft-07 ignores those annotations. Put validation constraints in the definition itself. Names in `properties` and values in `const`, `enum`, `default` and `examples` keep their original meaning.
 
 ## Where your data goes
 
 GLM-5.3 and DeepSeek V4.1 Flash run on Cloudflare Workers AI. If Cloudflare refuses a request before execution, Panda can send it to the same model via an OpenRouter zero-data-retention host. A Panel sends the conversation, tool descriptions, arguments and results to its members and uses a synthesizer for the final decision. Both built-in Panels include Gemini 3.8 Flash on Google Vertex AI's global endpoint. A routed request can choose a Panel as shown above. [Panda API guide](https://panda.repair/products/llm-api)
 
 Panda's privacy policy says it retains billing metadata and does not retain API prompts or responses. Gateway prompt logging and caching are disabled. Vertex's global endpoint can process data in multiple regions, and Google may retain prompts for abuse monitoring for up to 90 days. [Panda privacy policy](https://panda.repair/privacy#model-providers)
+
+## License
+
+MIT. [License text](LICENSE)

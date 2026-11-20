@@ -29,18 +29,69 @@ test("one integer output bound respects the smaller caller bound and the selecte
   assert.deepEqual(pandaPayload({ max_tokens: null }, model), { model: model.id });
 });
 
-test("schema adaptation removes dialect declarations without changing names, data, or reference semantics", () => {
+function clean(schema, tool = "read") {
+  return pandaPayload({ tools: [{ type: "function", function: { name: tool, parameters: schema } }] },
+    model).tools[0].function.parameters;
+}
+
+test("modern and legacy root references follow each dialect's annotation rules", () => {
   const uri = "https://json-schema.org/draft/2020-12/schema";
   const examples = [{ $schema: "literal", $ref: "literal" }];
-  const clean = schema => pandaPayload({ tools: [{ type: "function", function: { name: "read", parameters: schema } }] },
-    model).tools[0].function.parameters;
-  const schema = { $schema: uri, $id: "file", $defs: { unused: { type: "string" } }, type: "object",
-    properties: { $schema: { type: "string", examples }, items: { anyOf: [{ $schema: uri, type: "number" }] } } };
-  assert.deepEqual(clean(schema), { type: "object", properties: {
-    $schema: { type: "string", examples }, items: { anyOf: [{ type: "number" }] } } });
-  assert.equal(schema.$schema, uri);
-  assert.throws(() => clean({ properties: { child: { $ref: "#/$defs/child" } } }), /Inline the referenced schema/);
-  assert.throws(() => clean({ $schema: "https://example.test/custom" }), /unsupported JSON Schema dialect/);
+  const schema = { $schema: uri, $defs: { "a/b": { $ref: "#/definitions/x~0y" }, unused: { $ref: "https://unused.invalid" } },
+    definitions: { "x~y": { type: "integer", description: "from definition" } }, type: "object",
+    properties: { $schema: { $ref: "#/%24defs/a~1b", description: "local annotation", examples } } };
+  const modern = { type: "object", properties: { $schema: { type: "integer", description: "local annotation", examples } } };
+  assert.deepEqual(clean(schema), modern);
+  assert.deepEqual(clean({ ...schema, $schema: "http://json-schema.org/draft/2019-09/schema#" }), modern);
+  const { $schema, ...unmarked } = schema;
+  assert.deepEqual(clean(unmarked), modern);
+  assert.deepEqual(clean({ ...schema, $schema: "https://json-schema.org/draft-07/schema#" }), {
+    type: "object", properties: { $schema: { type: "integer", description: "from definition" } } });
+  assert.equal(schema.properties.$schema.$ref, "#/%24defs/a~1b");
+  const boolean = { $defs: { always: true }, $ref: "#/$defs/always" };
+  assert.equal(clean(boolean), true);
+  assert.throws(() => clean({ ...boolean, title: "x" }), /object schema/);
+  assert.equal(clean({ ...boolean, title: "x", $schema: "http://json-schema.org/draft-07/schema" }), true);
+});
+
+test("schema data and map names survive expansion while schema-valued positions are resolved", () => {
+  const literal = { $ref: "https://example.invalid/literal", $schema: "data", $id: "data" };
+  const value = { type: "string" };
+  const ref = { $ref: "#/$defs/T" };
+  const schema = { $defs: { T: value }, const: literal, enum: [literal], default: literal, examples: [literal],
+    patternProperties: { $ref: ref }, dependentSchemas: { $schema: ref }, dependentRequired: { $defs: ["$ref"] },
+    dependencies: { $id: ["$schema"] }, oneOf: [{ if: ref, then: { not: ref }, else: { items: ref } }],
+    vendor: { nested: ref } };
+  const out = clean(schema);
+  for (const k of ["const", "enum", "default", "examples", "dependentRequired", "dependencies"]) assert.deepEqual(out[k], schema[k]);
+  assert.deepEqual([out.patternProperties.$ref, out.dependentSchemas.$schema, out.oneOf[0].if, out.oneOf[0].then.not,
+    out.oneOf[0].else.items, out.vendor.nested], Array(6).fill(value));
+});
+
+test("invalid references, semantics-changing siblings, scopes and unsafe expansion fail locally", () => {
+  const source = { $defs: { T: { type: "string" }, "a/b": {}, "": {}, "%zz": {} } };
+  for (const pointer of ["https://remote.invalid/schema", "#/properties/T", "#/$defs/missing", "#/$defs/a%2Fb", "#/$defs/a~2", "#/$defs/%FF"]) {
+    assert.throws(() => clean({ ...source, $ref: pointer }), /local|Pointer|UTF-8/);
+  }
+  for (const pointer of ["#/$defs/", "#/$defs/%zz", "#/%24defs/a~1b"]) assert.deepEqual(clean({ ...source, $ref: pointer }), {});
+  for (const dialect of ["http://json-schema.org/draft-04/schema#", "https://json-schema.org/draft-06/schema", "urn:custom"]) {
+    assert.throws(() => clean({ $schema: dialect }), /dialect/);
+  }
+  assert.throws(() => clean({ $schema: "https://json-schema.org/draft-07/schema", ...source, $ref: "#/$defs/T", minimum: 1 }), /only annotations/);
+  assert.throws(() => clean({ $defs: [] }), /must be an object/);
+  for (const bad of ["$schema", "$defs", "definitions", "$id"]) assert.throws(() => clean({ properties: { a: { [bad]: {} } } }), /schema location/);
+  for (const bad of ["$anchor", "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor"]) {
+    assert.throws(() => clean({ ...source, properties: { a: { [bad]: "x" } } }), /scoping keyword/);
+  }
+  assert.throws(() => clean({ $defs: { a: { $ref: "#/definitions/b" } }, definitions: { b: { $ref: "#/$defs/a" } }, $ref: "#/$defs/a" }), /cyclic/);
+  const chain = n => ({ $defs: Object.fromEntries(Array.from({ length: n }, (_, i) =>
+    ["n" + i, i + 1 === n ? { type: "string" } : { $ref: "#/$defs/n" + (i + 1) }])), $ref: "#/$defs/n0" });
+  assert.deepEqual(clean(chain(32)), { type: "string" });
+  assert.throws(() => clean(chain(33)), /32/);
+  const bulky = { $defs: { T: { examples: Array(9).fill("x".repeat(4000)) } }, $ref: "#/$defs/T" };
+  assert.doesNotThrow(() => clean(bulky));
+  const tools = ["one", "two"].map(name => ({ type: "function", function: { name, parameters: bulky } }));
+  assert.throws(() => pandaPayload({ tools },model), /copies exceed/);
 });
 
 function fakeManager(id) {
@@ -97,6 +148,111 @@ test("failed logical requests retain their key, including when an extension chan
   const concurrent = await Promise.all([call(500), call(500)]);
   assert.notEqual(concurrent[0][0], concurrent[1][0]);
   await assert.rejects(call(200), /which failed request to retry/);
+});
+
+function retryHarness() {
+  const manager = fakeManager("session");
+  const keys = createRequestKeys();
+  keys.start(manager);
+  const sent = [];
+  const observed = [];
+  const invoke = pandaStream((target, responses, options) => {
+    const result = (async () => {
+      let stopReason = "error";
+      for (const next of responses) {
+        try {
+          const reply = await options.fetch(target.baseUrl, { method: "POST", body: "{}" });
+          observed.push({ status: reply.status, headers: reply.headers, body: await reply.text() });
+          stopReason = reply.ok && !next?.cut ? "stop" : "error";
+        } catch {
+          stopReason = "error";
+        }
+      }
+      return { stopReason };
+    })();
+    return { result: () => result };
+  }, keys, () => {});
+  return { sent, observed, async run(...responses) {
+    let index = 0;
+    return invoke(model, responses, { apiKey: "pnd_it_fixture", sessionId: manager.getSessionId(),
+      fetch: async (_url, init) => {
+        sent.push(init.headers.get("idempotency-key"));
+        const item = responses[index++];
+        if (item === null) throw new TypeError("connection lost");
+        if (item.response) return item.response;
+        const body = item.body ?? JSON.stringify({ error: { message: "fixture", code: item.code } });
+        return new Response(body, { status: item.status, headers: item.headers });
+      } }).result();
+  } };
+}
+
+test("HTTP outcomes choose identical keys in transport and whole-stream retries", async () => {
+  const cases = [
+    [null, true], [{ status: 200, cut: true }, true], [{ status: 500 }, true],
+    ...["interrupted", "outcome_unknown", "mixture_store_unavailable", "inference_upstream_unavailable"].map(code => [{ status: 503, code }, true]),
+    ...["model_unavailable", "model_refused"].map(code => [{ status: 503, code }, false]),
+    ...["answer_invalid", "answer_incomplete", "no_answers"].map(code => [{ status: 502, code }, false]),
+    ...[400, 401, 403, 408, 429].map(status => [{ status, code: "definite" }, false]),
+    [{ status: 409, code: "mixture_already_failed" }, false], [{ status: 503, body: "gateway" }, true],
+    [{ status: 502, code: "unknown_server_code" }, true], [{ status: 409, body: "" }, false],
+    [{ status: 409, body: "unreadable", headers: { "idempotency-replayed": "true" } }, true],
+    [{ status: 409, body: JSON.stringify({ panda: { replay: true } }) }, true],
+  ];
+  for (const [first, same] of cases) {
+    for (const layer of ["transport", "agent"]) {
+      const h = retryHarness();
+      if (layer === "transport") await h.run(first, { status: 200 });
+      else { await h.run(first); await h.run({ status: 200 }); }
+      assert.equal(h.sent.length, 2);
+      assert.equal(h.sent[0] === h.sent[1], same, JSON.stringify([first, layer]));
+      if (first?.code) assert.equal(JSON.parse(h.observed[0].body).error.code, first.code);
+    }
+  }
+});
+
+test("concurrent definite failures allow fresh attempts while ambiguous unknown failures block", async () => {
+  const h = retryHarness();
+  await Promise.all([h.run({ status: 503, code: "model_unavailable" }), h.run({ status: 502, code: "no_answers" })]);
+  await h.run({ status: 200 });
+  assert.equal(new Set(h.sent).size, 3);
+  const unknown = retryHarness();
+  await Promise.all([unknown.run({ status: 500 }), unknown.run({ status: 500 })]);
+  assert.equal((await unknown.run({ status: 200 })).stopReason, "error");
+  assert.equal(unknown.sent.length, 2);
+});
+
+test("completed and partial receipts stop both retry layers and retain bounded error details", async () => {
+  for (const status of ["completed", "partial"]) {
+    const h = retryHarness();
+    const code = "mixture_already_" + status;
+    const receipt = { error: { code, type: "invalid_request_error" }, panda: { status, charge: { minor_units: "1" } } };
+    await h.run(null, { status: 409, body: JSON.stringify(receipt), headers: {
+      "x-panda-request-id": "req_123", "idempotency-replayed": "true", "x-should-retry": "true" } }, { status: 200 });
+    await h.run({ status: 200 });
+    assert.equal(h.sent.length, 2);
+    assert.equal(h.sent[0], h.sent[1]);
+    assert.equal(h.observed.length, 3);
+    for (const response of h.observed) {
+      assert.equal(response.status, 409);
+      assert.equal(response.headers.get("x-should-retry"), "false");
+      assert.equal(response.headers.get("idempotency-replayed"), "true");
+      const body = JSON.parse(response.body);
+      assert.deepEqual(body.panda, receipt.panda);
+      assert.equal(body.error.code, code);
+      assert.match(body.error.message, /finished and was charged.*response was lost.*charge again.*req_123/);
+    }
+  }
+});
+
+test("large or misleading error envelopes preserve the original response and the uncertain key", async () => {
+  const body = JSON.stringify({ error: { code: "model_unavailable", message: "x".repeat(32_768) } });
+  for (const headers of [{}, { "content-length": "20" }, { "content-length": "50000" }]) {
+    const h = retryHarness();
+    await h.run({ status: 503, body, headers });
+    await h.run({ status: 200 });
+    assert.equal(h.sent[0], h.sent[1]);
+    assert.equal(h.observed[0].body, body);
+  }
 });
 
 test("a nested foreign request sharing the same alias does not inherit Panda's transformations", async () => {

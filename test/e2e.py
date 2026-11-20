@@ -22,6 +22,23 @@ def module_from(path):
     return module
 
 
+def check_fixture_ledger(mock):
+    recorder = mock.Recorder(None)
+    body = {"model": "glm-5.3", "messages": [{"role": "user", "content": "fixture"}]}
+    _, first_unkeyed = recorder.admit(None, body, None)
+    _, second_unkeyed = recorder.admit(None, body, None)
+    assert first_unkeyed["id"] != second_unkeyed["id"]
+    _, original = recorder.admit("one-key", body, None)
+    action, pending = recorder.admit("one-key", dict(body, seed=44, user="local-user"), None)
+    assert action == "replay" and pending["status"] == "running" and original["id"] == pending["id"]
+    assert recorder.admit("one-key", dict(body, temperature=0.2), None)[0] == "conflict"
+    recorder.settle(original, "completed")
+    assert recorder.admit("one-key", body, None)[1]["status"] == "completed"
+    assert pending["status"] == "running" and len(recorder.runs) == 3
+    return {"unkeyedRequestsIndependent": True, "pendingReplay": True, "ignoredFields": ["seed", "user"],
+            "changedTemperatureConflict": True, "settledReplay": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pi", type=Path, required=True, help="Pi 1.5.2 executable")
@@ -51,24 +68,23 @@ def main():
               '(deny file-write*)(allow file-write* (subpath ' + json.dumps(str(out)) + ') ' \
               '(literal "/dev/null") (literal "/dev/tty") (subpath "/dev/fd"))'
 
-    def run(arguments, label):
+    def run(arguments, label, expect=0):
         command = ["/usr/bin/sandbox-exec", "-p", profile, str(pi), *arguments]
         result = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, timeout=60)
         (out / (label + ".stdout")).write_text(result.stdout)
         (out / (label + ".stderr")).write_text(result.stderr)
-        if result.returncode:
+        if result.returncode != expect:
             raise RuntimeError(f"Pi exited {result.returncode}; see {label}.stderr")
-        return result.stdout
+        return result
 
     env["PANDA_BASE_URL"] = "http://127.0.0.1:1/v1"
-    version = run(["--version"], "version").strip()
+    version = run(["--version"], "version").stdout.strip()
     assert version == "1.5.2", version
     run(["install", str(ROOT)], "install")
     summary = {"pi": version, "models": {}}
     seen_keys = set()
-    for model in MODEL_IDS:
-        label = model.replace(":", "-")
+    def capture(label, model, fault=None, extension=False, expect=0):
         folder = out / "captures" / label
         folder.mkdir(parents=True)
         fixture = work / "capture-fixture.txt"
@@ -78,12 +94,14 @@ def main():
             server.fixture = fixture
             server.hold = 0.02
             server.recorder = mock.Recorder(folder)
+            server.scenario = fault
             thread = threading.Thread(target=server.serve_forever)
             thread.start()
             try:
                 env["PANDA_BASE_URL"] = f"http://127.0.0.1:{server.server_port}/v1"
-                final = run(["-p", "--no-session", "--model", "panda/" + model,
-                             "Read capture-fixture.txt with the read tool and give its first line."], label)
+                extra = ["-e", str(ROOT / "test/fixtures/referenced-tool.mjs")] if extension else []
+                result = run([*extra, "-p", "--no-session", "--model", "panda/" + model,
+                              "Read capture-fixture.txt with the read tool and give its first line."], label, expect)
             finally:
                 server.shutdown()
                 thread.join()
@@ -91,18 +109,76 @@ def main():
         listed = [r for r in records if r["method"] == "GET" and r["path"] == "/v1/models"]
         chat = [r for r in records if r["method"] == "POST" and r["path"] == "/v1/chat/completions"]
         rows = [checker.analyze(r) for r in records]
-        assert listed and len(records) == len(listed) + 2, label
-        assert [r["response_mode"] for r in chat] == ["main_read", "main_final"], label
-        assert marker not in chat[0]["raw_body"] and marker in final, label
-        assert any(m["role"] == "tool" and marker in str(m["content"]) for m in chat[1]["body"]["messages"]), label
-        assert all(r["body"]["model"] == model for r in chat), label
+        assert listed and len(records) == len(listed) + len(chat), label
         assert all(not row["violations"] for row in rows), [(row["id"], row["violations"]) for row in rows]
+        assert all(r["body"]["model"] == model for r in chat), label
+        return chat, listed, marker, result, server.recorder
+
+    def key(r):
+        keys = [v for k, v in r["headers"] if k.lower() == "idempotency-key"]
+        assert len(keys) == 1
+        return keys[0]
+
+    for model in MODEL_IDS:
+        label = model.replace(":", "-")
+        chat, listed, marker, result, _ = capture(label, model)
+        assert [r["response_mode"] for r in chat] == ["main_read", "main_final"], label
+        assert marker not in chat[0]["raw_body"] and marker in result.stdout, label
+        assert any(m["role"] == "tool" and marker in str(m["content"]) for m in chat[1]["body"]["messages"]), label
         for r in chat:
-            keys = [value for k, value in r["headers"] if k.lower() == "idempotency-key"]
-            assert len(keys) == 1 and keys[0] not in seen_keys, label
-            seen_keys.add(keys[0])
+            assert key(r) not in seen_keys, label
+            seen_keys.add(key(r))
         summary["models"][model] = {"discovery": len(listed), "chat": len(chat), "contractViolations": 0,
                                     "markerInToolResultAndFinalOutput": True}
+
+    # The original external capture scripts can still verify the seven plain turns.
+    if hasattr(mock.Recorder, "admit"):
+        summary["mockLedger"] = check_fixture_ledger(mock)
+        settings = Path(env["PI_CODING_AGENT_DIR"]) / "settings.json"
+        config = json.loads(settings.read_text())
+        model = "glm-5.3"
+        summary["faults"] = {}
+        cases = ["definite", "prehold", "drop_completed", "drop_partial", "unknown", "cut_200", "changed_body"]
+        for layer in ("agent", "transport"):
+            for fault in cases:
+                if layer == "transport" and fault in ("unknown", "cut_200", "changed_body"):
+                    # The shipped service vetoes transport retries for its semantic 503s.
+                    # SSE consumption occurs after that layer, and onPayload runs once per stream.
+                    continue
+                config["retry"] = {"enabled": layer == "agent", "baseDelayMs": 10,
+                                   "provider": {"maxRetries": 1 if layer == "transport" else 0}}
+                settings.write_text(json.dumps(config))
+                success = fault in ("definite", "prehold")
+                label = layer + "-" + fault
+                env["PANDA_FIXTURE_CHANGE_REPLAY"] = "1" if fault == "changed_body" else "0"
+                scenario = "drop_completed" if fault == "changed_body" else fault
+                if layer == "transport" and fault == "definite":
+                    # Model a gateway that omits x-should-retry so Pi elects to retry inside one stream.
+                    scenario = "definite_proxy"
+                chat, _, marker, result, recorder = capture(label, model, scenario,
+                    extension=fault == "changed_body", expect=0 if success else 1)
+                assert len(chat) == (3 if success else 2), (label, len(chat))
+                keys = [key(r) for r in chat]
+                if success:
+                    assert len(set(keys)) == len(keys) and marker in result.stdout, label
+                else:
+                    assert keys[0] == keys[1] and len(recorder.runs) == 1, label
+                    assert chat[-1]["response_status"] == 409, label
+                    if fault == "changed_body":
+                        assert chat[-1]["error_code"] == "mixture_idempotency_conflict", label
+                    else:
+                        assert chat[-1]["error_code"] == ("mixture_already_partial" if fault == "drop_partial" else "mixture_already_completed"), label
+                        assert "finished and was charged" in result.stderr and "Submitting again will charge again" in result.stderr, label
+                summary["faults"][label] = {"http": [r["response_status"] for r in chat], "distinctKeys": len(set(keys)),
+                    "codes": [r.get("error_code") for r in chat], "recordedRuns": len(recorder.runs),
+                    "chargedFixtureRuns": sum(run["status"] in ("completed", "partial") for run in recorder.runs.values()),
+                    "exit": result.returncode, "contractViolations": 0}
+        env.pop("PANDA_FIXTURE_CHANGE_REPLAY")
+        chat, _, marker, result, _ = capture("local-references", model, extension=True)
+        fn = next(t["function"] for t in chat[0]["body"]["tools"] if t["function"]["name"] == "panda_fixture_read")
+        assert fn["parameters"] == {"type": "object", "properties": {"path": {"type": "string", "description": "Local fixture path"}}, "required": ["path"]}
+        assert marker in result.stdout and any(m["role"] == "tool" and marker in str(m["content"]) for m in chat[1]["body"]["messages"])
+        summary["localReferences"] = {"tool": fn["name"], "wireParameters": fn["parameters"], "markerRoundTrip": True}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
 

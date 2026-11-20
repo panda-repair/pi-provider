@@ -2,6 +2,7 @@
 import datetime as dt
 import json
 import os
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler
@@ -31,6 +32,28 @@ class Recorder:
         self.lock = threading.Lock()
         self.active = {}
         self.next_id = 1
+        self.chat_count = 0
+        self.runs = {}
+
+    def admit(self, key, body, scenario):
+        """Single-account fixture. Preserve raw capture and ignore seed/user for key matching."""
+        with self.lock:
+            self.chat_count += 1
+            request = {k: v for k, v in body.items() if k not in ("seed", "user")}
+            if key is not None and key in self.runs:
+                run = self.runs[key]
+                return ("replay" if run["request"] == request else "conflict"), dict(run)
+            fault = scenario if self.chat_count == 1 else None
+            if fault == "prehold":
+                return fault, None
+            status = {"definite": "failed", "definite_proxy": "failed", "drop_partial": "partial"}.get(fault, "completed" if fault else "running")
+            run = {"request": request, "id": "req_fixture_" + str(len(self.runs) + 1), "status": status}
+            self.runs[key if key is not None else object()] = run
+            return fault or "normal", run
+
+    def settle(self, run, status):
+        with self.lock:
+            run["status"] = status
 
     def start(self, handler):
         with self.lock:
@@ -59,6 +82,8 @@ class Recorder:
 
 
 def function_for_read(tools, fixture):
+    if any(tool.get("function", {}).get("name") == "panda_fixture_read" for tool in tools):
+        return "panda_fixture_read", {"path": str(fixture)}
     for entry in tools:
         func = entry.get("function", {})
         name = func.get("name", "")
@@ -100,19 +125,67 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def reply(self, status, kind, data):
+    def reply(self, status, kind, data, headers=None):
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Connection", "close")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
         self.wfile.flush()
         self.close_connection = True
 
+    def fault(self, action, run, record):
+        response_headers = {}
+        receipt = None
+        if run:
+            record["run_id"] = run["id"]
+            response_headers["X-Panda-Request-ID"] = run["id"]
+        if action == "normal":
+            return False
+        record["response_mode"] = action
+        if action in ("drop_completed", "drop_partial", "cut_200"):
+            if action == "cut_200":
+                record["response_status"] = 200
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", "4096")
+                self.end_headers()
+                self.wfile.write(b": partial event stream\n\n")
+                self.wfile.flush()
+                time.sleep(0.04)
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
+            return True
+        if action == "replay":
+            status, code = 409, "mixture_already_" + run["status"]
+            response_headers.update({"Idempotency-Replayed": "true", "x-should-retry": "false"})
+            charge = {"schema_version": "panda.usd-amount.v1", "currency": "USD",
+                      "minor_units": "0" if run["status"] == "failed" else "1"}
+            receipt = {"version": "panda.chat.v1", "replay": True, "request_id": run["id"],
+                       "status": run["status"], "charge": None if run["status"] == "running" else charge}
+        else:
+            status, code = {"prehold": (429, "throttle_workspace_rate_limited"), "definite": (503, "model_unavailable"),
+                            "definite_proxy": (503, "model_unavailable"),
+                            "unknown": (503, "outcome_unknown"), "conflict": (409, "mixture_idempotency_conflict")}[action]
+            if action == "prehold":
+                response_headers["Retry-After"] = "0"
+            elif action != "definite_proxy":
+                response_headers["x-should-retry"] = "false"
+        record.update(response_status=status, error_code=code)
+        error_type = "server_error" if status >= 500 else "invalid_request_error"
+        envelope = {"error": {"type": error_type, "code": code, "message": code}}
+        if receipt:
+            envelope["panda"] = receipt
+        self.reply(status, "application/json", compact(envelope).encode(), response_headers)
+        return True
+
     def capture(self):
         state = self.server
         record = state.recorder.start(self)
+        admitted = None
         try:
             if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
                 pieces = []
@@ -140,6 +213,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "mock"} for m in MODELS]}
                 payload = compact(result).encode()
             elif self.command == "POST" and route == "/v1/chat/completions" and isinstance(body, dict):
+                action, run = state.recorder.admit(self.headers.get("Idempotency-Key"), body, getattr(state, "scenario", None))
+                if self.fault(action, run, record):
+                    return
+                admitted = run
                 mode, delta, reason = answer_for(body, state.fixture)
                 record.update(response_mode=mode)
                 time.sleep(state.hold)
@@ -165,10 +242,14 @@ class Handler(BaseHTTPRequestHandler):
                 status, record["response_mode"] = 404, "unsupported_route"
                 payload = compact({"error": {"message": "Route not provided by this Chat Completions fixture.", "type": "invalid_request_error", "code": "route_not_found"}}).encode()
             record.update(response_status=status, response_content_type=content_type)
+            if admitted:
+                state.recorder.settle(admitted, "completed")
             self.reply(status, content_type, payload)
         except (BrokenPipeError, ConnectionResetError) as error:
             record["connection_error"] = type(error).__name__
         except Exception as error:
+            if admitted and admitted["status"] == "running":
+                state.recorder.settle(admitted, "failed")
             record.update(mock_error=repr(error), response_status=500)
             self.reply(500, "application/json", compact({"error": str(error)}).encode())
         finally:
