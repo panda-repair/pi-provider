@@ -228,11 +228,13 @@ async function classifyResponse(attempt, response) {
   if (status !== 409 && status !== 502 && status !== 503) return response;
   const data = await boundedError(response);
   const code = data?.error?.code;
-  if (status === 409 && (code === "mixture_already_completed" || code === "mixture_already_partial")) {
+  if (status === 409 && ["mixture_already_running", "mixture_already_completed", "mixture_already_partial"].includes(code)) {
     const requestId = headers.get("x-panda-request-id") ?? data.panda?.request_id;
     const id = typeof requestId === "string" && /^[a-zA-Z0-9_.:/-]{1,128}$/.test(requestId) ? requestId : undefined;
-    const message = "The earlier Panda request finished and was charged. Its response was lost. Submitting again will charge again." +
-      (id ? " Panda request ID: " + id + "." : "");
+    const explanation = code === "mixture_already_running"
+      ? "The earlier identical request is still running and will be charged when it completes. Its answer cannot be recovered. Resubmitting starts and charges a second run."
+      : "The earlier Panda request finished and was charged. Its response was lost. Submitting again will charge again.";
+    const message = explanation + (id ? " Panda request ID: " + id + "." : "");
     const safeHeaders = new Headers(headers);
     for (const name of ["content-length", "content-encoding", "transfer-encoding"]) safeHeaders.delete(name);
     safeHeaders.set("content-type", "application/json");
@@ -244,7 +246,7 @@ async function classifyResponse(attempt, response) {
   // A plain 409 is definite. If Panda explicitly marks a replay and the bounded
   // envelope cannot identify its outcome, keep the key so an original charge survives.
   const markedReplay = headers.get("idempotency-replayed")?.toLowerCase() === "true" || data?.panda?.replay === true;
-  const definiteReplay = ["mixture_already_running", "mixture_already_failed", "mixture_idempotency_conflict"].includes(code);
+  const definiteReplay = ["mixture_already_failed", "mixture_idempotency_conflict"].includes(code);
   attempt.fresh = (status === 409 && (!markedReplay || definiteReplay)) ||
     (status === 502 && ["answer_invalid", "answer_incomplete", "no_answers"].includes(code)) ||
     (status === 503 && ["model_unavailable", "model_refused"].includes(code));

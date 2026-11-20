@@ -138,7 +138,7 @@ def main():
         config = json.loads(settings.read_text())
         model = "glm-5.3"
         summary["faults"] = {}
-        cases = ["definite", "prehold", "drop_completed", "drop_partial", "unknown", "cut_200", "changed_body"]
+        cases = ["definite", "prehold", "drop_running", "drop_completed", "drop_partial", "unknown", "cut_200", "changed_body"]
         for layer in ("agent", "transport"):
             for fault in cases:
                 if layer == "transport" and fault in ("unknown", "cut_200", "changed_body"):
@@ -166,6 +166,14 @@ def main():
                     assert chat[-1]["response_status"] == 409, label
                     if fault == "changed_body":
                         assert chat[-1]["error_code"] == "mixture_idempotency_conflict", label
+                    elif fault == "drop_running":
+                        assert chat[-1]["error_code"] == "mixture_already_running", label
+                        receipt = chat[-1]["receipt"]
+                        assert receipt["charge"] is None and receipt["held"] is None and receipt["status"] == "running", label
+                        assert receipt["request_id"] == chat[0]["run_id"] and receipt["request_id"] in result.stderr, label
+                        assert next(iter(recorder.runs.values()))["status"] == "running", label
+                        assert all(part in result.stderr for part in ("still running", "will be charged when it completes",
+                            "answer cannot be recovered", "starts and charges a second run")), label
                     else:
                         assert chat[-1]["error_code"] == ("mixture_already_partial" if fault == "drop_partial" else "mixture_already_completed"), label
                         assert "finished and was charged" in result.stderr and "Submitting again will charge again" in result.stderr, label
@@ -173,6 +181,8 @@ def main():
                     "codes": [r.get("error_code") for r in chat], "recordedRuns": len(recorder.runs),
                     "chargedFixtureRuns": sum(run["status"] in ("completed", "partial") for run in recorder.runs.values()),
                     "exit": result.returncode, "contractViolations": 0}
+                if fault == "drop_running":
+                    summary["faults"][label]["receipt"] = {k: receipt[k] for k in ("status", "charge", "held")}
         env.pop("PANDA_FIXTURE_CHANGE_REPLAY")
         chat, _, marker, result, _ = capture("local-references", model, extension=True)
         fn = next(t["function"] for t in chat[0]["body"]["tools"] if t["function"]["name"] == "panda_fixture_read")

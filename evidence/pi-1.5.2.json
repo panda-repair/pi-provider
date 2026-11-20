@@ -12,9 +12,9 @@
   "apiContractRevision": "cb676cac",
   "schemaReferenceRevision": "beea6489f393d24bb08c602c4cc6e8eee0b5834b",
   "repoIntegration": {
-    "scenarios": 19,
-    "getModels": 19,
-    "chatPosts": 42,
+    "scenarios": 21,
+    "getModels": 21,
+    "chatPosts": 46,
     "contractViolations": 0,
     "models": {
       "glm-5.3": {
@@ -94,6 +94,26 @@
         "chargedFixtureRuns": 2,
         "exit": 0,
         "contractViolations": 0
+      },
+      "agent-drop_running": {
+        "http": [
+          null,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          null,
+          "mixture_already_running"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 0,
+        "exit": 1,
+        "contractViolations": 0,
+        "receipt": {
+          "status": "running",
+          "charge": null,
+          "held": null
+        }
       },
       "agent-drop_completed": {
         "http": [
@@ -203,6 +223,26 @@
         "chargedFixtureRuns": 2,
         "exit": 0,
         "contractViolations": 0
+      },
+      "transport-drop_running": {
+        "http": [
+          null,
+          409
+        ],
+        "distinctKeys": 1,
+        "codes": [
+          null,
+          "mixture_already_running"
+        ],
+        "recordedRuns": 1,
+        "chargedFixtureRuns": 0,
+        "exit": 1,
+        "contractViolations": 0,
+        "receipt": {
+          "status": "running",
+          "charge": null,
+          "held": null
+        }
       },
       "transport-drop_completed": {
         "http": [
@@ -407,7 +447,8 @@
         "chargeMinorUnits": 6,
         "exit": 0
       }
-    }
+    },
+    "sourcePackageRevision": "d4e5292"
   },
   "schemaComparison": {
     "inputs": 104,
@@ -418,7 +459,8 @@
     "mismatchedAdmissionDecisions": 0,
     "allInputsPreserved": true,
     "inlineEquivalent": true,
-    "actualReadImageEquivalent": true
+    "actualReadImageEquivalent": true,
+    "sourcePackageRevision": "d4e5292"
   },
   "pack": {
     "files": [
@@ -432,20 +474,46 @@
     ],
     "sourceSha256": {
       "LICENSE": "61f97aef30fe1f6f67e3fa62269c9889bb029e7452c5ea796512a27e38f069d4",
-      "README.md": "1a196c42499a4b84fe2f8fc64c5946881d58988504f815e29a3ad2ceab310e99",
+      "README.md": "fe5b5bb7d494925aefa71eab362d0c2819a8c9b25f677abb82b160dffea54597",
       "index.js": "290c442c5571b7c53486a88ad20f61db1f946806d721ec00f8a764aa591792fa",
       "package.json": "ef8157232eec3d909ffef40eff54ddea605d02cf0b3b6f8e3770c1f4bdbdecc2",
       "src/catalog.js": "9498a6a01b0c194d6f97be6c4107e1cf78492902b6020784af6481cbdc4a0cb5",
       "src/provider.js": "4c0192191b7d7ee67ced29897ac0b6d4de447d5d7d33c93db04908cbb8e792eb",
-      "src/request.js": "0cdd3223f977b6eda61effd3d0da72d515f81abe253592693ec2c00fc27da5ce"
+      "src/request.js": "269c35544336e1e97668d178f66256fd474def8e88b565154a72215a5039d125"
     },
-    "archiveSha256": "c1027a91f8976acbad82b34f54af987e479116fdc5439935cb09638621c19932",
-    "packedBytes": 10577,
-    "unpackedBytes": 28288,
+    "archiveSha256": "7088be84244b8e6a58665efe64f3022d07da0ae4896f8ba2220acf791d1875b7",
+    "packedBytes": 10704,
+    "unpackedBytes": 28715,
     "licenseHolder": "Copyright (c) 2026 panda-repair",
     "standardMitTermsMatched": true,
-    "freshInstallScenarios": 3,
-    "freshInstallRequests": 9,
+    "freshInstallScenarios": 7,
+    "freshInstallRequests": 21,
     "freshInstallContractViolations": 0
+  },
+  "runningReplayComparison": {
+    "priorRevision": "d4e5292",
+    "forcedAgentReentryBefore": {
+      "httpPosts": 3,
+      "admittedFixtureRuns": 2,
+      "pendingFixtureRuns": 1,
+      "settledFixtureChargeMinorUnits": 3,
+      "keys": [
+        1,
+        1,
+        3
+      ]
+    },
+    "forcedAgentReentryAfter": {
+      "httpPosts": 2,
+      "admittedFixtureRuns": 1,
+      "pendingFixtureRuns": 1,
+      "settledFixtureChargeMinorUnits": 0,
+      "keys": [
+        1,
+        1
+      ]
+    },
+    "currentScenariosPassed": 9,
+    "currentScenarios": 9
   }
 }

@@ -46,7 +46,8 @@ class Recorder:
             fault = scenario if self.chat_count == 1 else None
             if fault == "prehold":
                 return fault, None
-            status = {"definite": "failed", "definite_proxy": "failed", "drop_partial": "partial"}.get(fault, "completed" if fault else "running")
+            status = {"definite": "failed", "definite_proxy": "failed", "drop_partial": "partial",
+                      "drop_running": "running"}.get(fault, "completed" if fault else "running")
             run = {"request": request, "id": "req_fixture_" + str(len(self.runs) + 1), "status": status}
             self.runs[key if key is not None else object()] = run
             return fault or "normal", run
@@ -146,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
         if action == "normal":
             return False
         record["response_mode"] = action
-        if action in ("drop_completed", "drop_partial", "cut_200"):
+        if action in ("drop_running", "drop_completed", "drop_partial", "cut_200"):
             if action == "cut_200":
                 record["response_status"] = 200
                 self.send_response(200)
@@ -166,6 +167,8 @@ class Handler(BaseHTTPRequestHandler):
                       "minor_units": "0" if run["status"] == "failed" else "1"}
             receipt = {"version": "panda.chat.v1", "replay": True, "request_id": run["id"],
                        "status": run["status"], "charge": None if run["status"] == "running" else charge}
+            if run["status"] == "running":
+                receipt["held"] = None
         else:
             status, code = {"prehold": (429, "throttle_workspace_rate_limited"), "definite": (503, "model_unavailable"),
                             "definite_proxy": (503, "model_unavailable"),
@@ -179,6 +182,7 @@ class Handler(BaseHTTPRequestHandler):
         envelope = {"error": {"type": error_type, "code": code, "message": code}}
         if receipt:
             envelope["panda"] = receipt
+            record["receipt"] = receipt
         self.reply(status, "application/json", compact(envelope).encode(), response_headers)
         return True
 

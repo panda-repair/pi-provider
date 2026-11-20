@@ -193,7 +193,9 @@ test("HTTP outcomes choose identical keys in transport and whole-stream retries"
     ...["model_unavailable", "model_refused"].map(code => [{ status: 503, code }, false]),
     ...["answer_invalid", "answer_incomplete", "no_answers"].map(code => [{ status: 502, code }, false]),
     ...[400, 401, 403, 408, 429].map(status => [{ status, code: "definite" }, false]),
-    [{ status: 409, code: "mixture_already_failed" }, false], [{ status: 503, body: "gateway" }, true],
+    ...["mixture_already_failed", "mixture_idempotency_conflict"].map(code =>
+      [{ status: 409, code, headers: { "idempotency-replayed": "true" } }, false]),
+    [{ status: 503, body: "gateway" }, true],
     [{ status: 502, code: "unknown_server_code" }, true], [{ status: 409, body: "" }, false],
     [{ status: 409, body: "unreadable", headers: { "idempotency-replayed": "true" } }, true],
     [{ status: 409, body: JSON.stringify({ panda: { replay: true } }) }, true],
@@ -241,6 +243,28 @@ test("completed and partial receipts stop both retry layers and retain bounded e
       assert.equal(body.error.code, code);
       assert.match(body.error.message, /finished and was charged.*response was lost.*charge again.*req_123/);
     }
+  }
+});
+
+test("a running replay returns the pending receipt locally on both transport and agent re-entry", async () => {
+  const h = retryHarness();
+  const code = "mixture_already_running";
+  const panda = { replay: true, status: "running", request_id: "req_pending", run_id: "run-pending", charge: null, held: null };
+  const running = { status: 409, headers: { "idempotency-replayed": "true", "x-should-retry": "true" },
+    body: JSON.stringify({ error: { type: "invalid_request_error", code }, panda }) };
+  await h.run(null, running, { status: 200 });
+  await h.run({ status: 200 });
+  assert.equal(h.sent.length, 2);
+  assert.equal(h.sent[0], h.sent[1]);
+  assert.equal(h.observed.length, 3);
+  for (const response of h.observed) {
+    assert.equal(response.status, 409);
+    assert.equal(response.headers.get("idempotency-replayed"), "true");
+    assert.equal(response.headers.get("x-should-retry"), "false");
+    const receipt = JSON.parse(response.body);
+    assert.deepEqual(receipt.panda, panda);
+    assert.equal(receipt.error.code, code);
+    assert.match(receipt.error.message, /identical request is still running.*will be charged when it completes.*answer cannot be recovered.*starts and charges a second run.*req_pending/is);
   }
 });
 
