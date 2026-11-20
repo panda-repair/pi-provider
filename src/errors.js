@@ -132,7 +132,7 @@ export function describeError(status, data, headers) {
   const delay = headers.get("retry-after");
   if (delay && /^\d{1,3}$/.test(delay) && Number(delay) <= 600) cleanHeaders["retry-after"] = delay;
   const error = { message, code: code ?? "panda_request_error", param };
-  return { action, message, status, headers: cleanHeaders, body: JSON.stringify({ error, ...(panda && { panda }) }) };
+  return { action, message, status, headers: cleanHeaders, details: { code, param, requestId: id }, body: JSON.stringify({ error, ...(panda && { panda }) }) };
 }
 
 export function errorResponse(error) {

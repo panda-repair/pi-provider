@@ -3,19 +3,19 @@ import assert from "node:assert/strict";
 import backendGrants from "../src/routing-backend-grants.json" with { type: "json" };
 import { catalog, compat, modelDefinitions } from "../src/catalog.js";
 import { createHash } from "node:crypto";
-import { createPandaProvider, defaultBaseUrl, normalizeBaseUrl, permittedModels } from "../src/provider.js";
+import { configuredToken, createPandaProvider, defaultBaseUrl, normalizeBaseUrl, permittedModels } from "../src/provider.js";
 
 const baseUrl = "http://127.0.0.1:8100/v1";
 const ids = ["auto", "auto:cost", "auto:quality", "panel:panda", "panel:panda-quality"];
 const signal = new AbortController().signal;
 
-function rig() {
+function rig(pickerKey) {
   let key = "pnd_it_local";
   let stored;
   let response = () => Response.json({ data: [{ id: "auto" }, { id: "auto:cost" }, { id: backendGrants[0] }, { id: "foreign" }] });
   const requests = [];
   const streams = { stream() { throw new Error("Transport called"); }, streamSimple() { throw new Error("Transport called"); } };
-  const provider = createPandaProvider({ baseUrl, streams,
+  const provider = createPandaProvider({ baseUrl, streams, pickerKey,
     fetchImpl: async (url, options) => { requests.push({ url, ...options }); return response(); } });
   const refresh = (options = {}) => provider.refreshModels({
     allowNetwork: true, credential: key ? { type: "api_key", key } : undefined, stored, signal,
@@ -107,7 +107,7 @@ test("failed, switched, or removed credentials cannot retain a previous model gr
   await refresh();
   assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["panel:panda"]);
   respond(() => new Response("private error detail", { status: 403 }));
-  await assert.rejects(refresh(), { message: "Panda model discovery failed. Panda returned HTTP 403." });
+  await assert.rejects(refresh(), { message: "Panda model discovery failed (HTTP 403)." });
   assert.deepEqual(provider.filterModels(provider.getModels(), undefined), []);
   key(undefined);
   const previous = requests.length;
@@ -232,5 +232,32 @@ test("old scoped snapshots migrate underlying grants without exposing retired or
     fresh.key("pnd_it_changed");
     await fresh.refresh({ allowNetwork: false, stored });
     assert.deepEqual(fresh.provider.filterModels(modelDefinitions(baseUrl)), []);
+  }
+});
+
+
+test("cache-only picker resolves only the scoped credential and detects rotation without a refresh", async () => {
+  const names = [];
+  const env = key => { names.push(key); return { A:"local", B:"fixture" }[key]; };
+  assert.equal(configuredToken("pnd_it_saved",env),"pnd_it_saved");
+  assert.equal(configuredToken("OTHER_KEY",env),undefined);
+  assert.equal(configuredToken("!secret-command",env),undefined);
+  assert.deepEqual(names,[]);
+  assert.equal(configuredToken("pnd_it_${A}-$B-$$-$!",env),"pnd_it_local-fixture-$-!");
+  assert.deepEqual(names,["A","B"]);
+  assert.equal(configuredToken("pnd_it_$MISSING",env),undefined);
+  let key = "pnd_it_local";
+  for (const defaultEnv of [true, false]) {
+    const setup = rig(() => ({defaultEnv, key}));
+    await setup.refresh();
+    await setup.provider.auth.apiKey.resolve({ctx:{env: () => key},signal});
+    const rows = setup.provider.getModels();
+    assert.equal(setup.provider.filterModels(rows).length, 2);
+    key = "pnd_it_replaced";
+    assert.equal(setup.provider.filterModels(rows).length, 0);
+    assert.equal(setup.provider.filterModels(rows,{key:"pnd_it_local"}).length, 2);
+    key = undefined;
+    assert.equal(setup.provider.filterModels(rows).length, 0);
+    key = "pnd_it_local";
   }
 });

@@ -20,6 +20,21 @@ function inferenceToken(value) {
   return /^pnd_it_[^\s]+$/.test(token) ? token : undefined;
 }
 
+// Match Pi's non-command models.json templates without evaluating a credential command.
+export function configuredToken(spec, env) {
+  if (typeof spec !== "string" || spec.startsWith("!")) return;
+  let missing = false;
+  const value = spec.replace(/\$\$|\$!|\$\{[^}]*\}|\$[A-Za-z_]\w*/g, part => {
+    if (part === "$$" || part === "$!") return part[1];
+    const name = part.startsWith("${") ? part.slice(2, -1) : part.slice(1);
+    if (!/^[A-Za-z_]\w*$/.test(name)) return part;
+    const bound = env(name);
+    if (!bound) missing = true;
+    return bound ?? "";
+  });
+  return missing ? undefined : inferenceToken(value);
+}
+
 // Discovery grants access to the underlying backends separately from access to the routers.
 export function permittedModels(data, url) {
   if (!Array.isArray(data)) throw new Error("Panda model discovery returned an invalid model list.");
@@ -34,11 +49,13 @@ function grantTag(url, token, models) {
   return "panda-v2-" + createHmac("sha256", token).update(JSON.stringify([url, models.map(model => model.id)])).digest("hex");
 }
 
-export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys = createRequestKeys(), observe }) {
+export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, pickerKey, keys = createRequestKeys(), observe }) {
   let endpoint = baseUrl;
   let hostEndpoint;
   let effective;
+  let resolvedDefault;
   let cached;
+  let discoveryFailure;
   let granted = [];
 
   function restore(url, entry) {
@@ -70,6 +87,8 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
     const token = inferenceToken(credential?.key ?? await ctx.env("PANDA_API_TOKEN"));
     signal.throwIfAborted();
     effective = expectedTag(token);
+    const configured = pickerKey?.();
+    resolvedDefault = configured?.defaultEnv ? expectedTag(inferenceToken(configured.key)) : undefined;
     if (token) return { auth: { apiKey: token, ...(hostEndpoint && { baseUrl: hostEndpoint }) }, source: credential?.key ? "stored Panda token" : "PANDA_API_TOKEN" };
   }
 
@@ -82,7 +101,12 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
   }
 
   function filterModels(models, credential) {
-    const identity = credential?.key ? expectedTag(inferenceToken(credential.key)) : effective;
+    // Pi's composed picker supplies only a stored credential. A simple custom
+    // models.json environment binding can be checked locally even during a cache-only list.
+    const configured = credential?.key ? undefined : pickerKey?.();
+    const local = configured ? expectedTag(inferenceToken(configured.key)) : undefined;
+    const identity = credential?.key ? expectedTag(inferenceToken(credential.key)) :
+      !configured || (configured.defaultEnv && effective && local === resolvedDefault) ? effective : local;
     if (!cached || identity !== cached) return [];
     const allowed = new Set(granted.map(model => model.id));
     return models.filter(model => model.provider === "panda" && model.api === "openai-completions" &&
@@ -92,6 +116,7 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
   const definitions = modelDefinitions(baseUrl);
   return {
     id: "panda", name: "Panda", baseUrl,
+    discoveryError: () => discoveryFailure,
     acceptsTarget(model) {
       return model.api === "openai-completions" && (!hostEndpoint || normalizeBaseUrl(model.baseUrl) === hostEndpoint);
     },
@@ -118,6 +143,7 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
       if (signal.aborted) return;
       if (!allowNetwork) {
         await publish({ update() {
+          discoveryFailure = undefined;
           restore(url, stored);
           effective = expectedTag(key);
         } });
@@ -136,7 +162,10 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
         if (!response.ok) {
           const error = describeError(response.status, await boundedJSON(response), response.headers);
           void response.body?.cancel().catch(() => {});
-          throw new DiscoveryError("Panda model discovery failed. " + error.message);
+          const { code, param, requestId } = error.details;
+          const fields = [code && "Code: " + code + ".", param && "Parameter: " + param + ".",
+            requestId && "Panda request ID: " + requestId + "."].filter(Boolean);
+          throw new DiscoveryError(["Panda model discovery failed (HTTP " + response.status + ").", ...fields].join(" "));
         }
         const body = await boundedJSON(response, 512 * 1024, 10_000);
         void response.body?.cancel().catch(() => {});
@@ -145,9 +174,9 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, keys 
         await publish({ persist: entry, update() { restore(url, entry); effective = entry.etag; } });
       } catch (error) {
         if (signal.aborted) return;
-        await publish({ persist: null, update() { effective = undefined; restore(url); } });
-        if (error instanceof DiscoveryError) throw error;
-        throw new Error("Could not read the Panda model catalog. Check your endpoint and credentials.");
+        const message = error instanceof DiscoveryError ? error.message : "Could not read the Panda model catalog. Check your endpoint and credentials.";
+        await publish({ persist: null, update() { effective = undefined; restore(url); discoveryFailure = message; } });
+        throw new Error(message);
       }
     },
     stream: pandaStream(streams.stream, keys, assertAvailable, observe),
