@@ -1,132 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { catalog } from "../src/catalog.js";
-import { beforeProviderRequest, createRequestKeys, pandaPayload, pandaStream } from "../src/request.js";
+import { createRequestKeys, pandaStream } from "../src/request.js";
 
 const model = { provider: "panda", id: "glm-5.3", baseUrl: "http://127.0.0.1:8100/v1" };
-const max = catalog.find(entry => entry.id === model.id).maxTokens;
-const messages = [{ role: "developer", content: "Read requested files." }, { role: "user", content: "Hello" }];
-
-test("payload allowlist preserves supported content, tools and usage while dropping unsupported options", () => {
-  const tools = [{ type: "function", function: { name: "read", parameters: { type: "object" } } }];
-  const input = { model: model.id, messages, tools, tool_choice: "auto", temperature: 0.5,
-    store: false, reasoning_effort: "high", frequency_penalty: 0, presence_penalty: 0, metadata: {},
-    prompt_cache_key: "a", prompt_cache_retention: "24h", surprise: 5, stream: true,
-    stream_options: { include_usage: true, other: true }, response_format: { type: "json_object" }, n: 2, logprobs: true };
-  assert.deepEqual(pandaPayload(input, model), { model: model.id, messages, tools,
-    tool_choice: "auto", temperature: 0.5, stream: true, stream_options: { include_usage: true } });
-  assert.equal(input.store, false);
-  assert.deepEqual(pandaPayload({ messages, stream: false, stream_options: { include_usage: true }, tools: [] }, model),
-    { messages, model: model.id, stream: false });
-  assert.equal(pandaPayload(input, { ...model, provider: "other" }), input);
-});
-
-test("one integer output bound respects the smaller caller bound and the selected model cap", () => {
-  assert.deepEqual(pandaPayload({ max_tokens: max + 10 }, model), { model: model.id, max_tokens: max });
-  assert.deepEqual(pandaPayload({ max_completion_tokens: max + 2, max_tokens: 7 }, model),
-    { model: model.id, max_completion_tokens: 7 });
-  assert.deepEqual(pandaPayload({ max_tokens: -2 }, model), { model: model.id, max_tokens: 1 });
-  assert.deepEqual(pandaPayload({ max_tokens: null }, model), { model: model.id });
-});
-
-function clean(schema, tool = "read") {
-  return pandaPayload({ tools: [{ type: "function", function: { name: tool, parameters: schema } }] },
-    model).tools[0].function.parameters;
-}
-
-test("all canonical root dialect URIs normalize, and other markers fail before transport", async () => {
-  const definition = { type: "string", description: "original" };
-  const parameters = { $defs: { field: definition }, type: "object",
-    properties: { value: { $ref: "#/$defs/field", description: "annotation" } } };
-  for (const scheme of ["http", "https"]) {
-    for (const fragment of ["", "#"]) {
-      for (const path of ["draft/2020-12", "draft/2019-09", "draft-07"]) {
-        const uri = scheme + "://json-schema.org/" + path + "/schema" + fragment;
-        const out = clean({ ...parameters, $schema: uri });
-        assert.deepEqual(out, { type: "object", properties: {
-          value: { ...definition, description: path === "draft-07" ? "original" : "annotation" },
-        } }, uri);
-      }
-    }
-  }
-  const invalid = [null, 7, {}, "json-schema.org/draft-07/schema", "HTTPS://json-schema.org/draft-07/schema",
-    "https://example.test/draft-07/schema", "https://json-schema.org/draft-07/schema#other",
-    "https://json-schema.org/draft-07/schema##", "https://json-schema.org/draft-07/schema/"];
-  for (const scheme of ["http", "https"]) {
-    for (const path of ["draft-04", "draft-06"]) {
-      for (const fragment of ["", "#"]) invalid.push(scheme + "://json-schema.org/" + path + "/schema" + fragment);
-    }
-  }
-  let sends = 0;
-  const invoke = pandaStream(fakeNative, createRequestKeys(), () => {});
-  for (const marker of invalid) {
-    const tools = [{ type: "function", function: { name: "read", parameters: { ...parameters, $schema: marker } } }];
-    const stream = invoke(model, { body: { tools } }, { apiKey: "pnd_it_fixture", fetch: async () => { sends++; return new Response(); } });
-    await assert.rejects(stream.result(), /unsupported root JSON Schema dialect/);
-  }
-  assert.equal(sends, 0);
-});
-
-test("modern and legacy root references follow each dialect's annotation rules", () => {
-  const uri = "https://json-schema.org/draft/2020-12/schema";
-  const examples = [{ $schema: "literal", $ref: "literal" }];
-  const schema = { $schema: uri, $defs: { "a/b": { $ref: "#/definitions/x~0y" }, unused: { $ref: "https://unused.invalid" } },
-    definitions: { "x~y": { type: "integer", description: "from definition" } }, type: "object",
-    properties: { $schema: { $ref: "#/%24defs/a~1b", description: "local annotation", examples } } };
-  const modern = { type: "object", properties: { $schema: { type: "integer", description: "local annotation", examples } } };
-  assert.deepEqual(clean(schema), modern);
-  assert.deepEqual(clean({ ...schema, $schema: "http://json-schema.org/draft/2019-09/schema#" }), modern);
-  const { $schema, ...unmarked } = schema;
-  assert.deepEqual(clean(unmarked), modern);
-  assert.deepEqual(clean({ ...schema, $schema: "https://json-schema.org/draft-07/schema#" }), {
-    type: "object", properties: { $schema: { type: "integer", description: "from definition" } } });
-  assert.equal(schema.properties.$schema.$ref, "#/%24defs/a~1b");
-  const boolean = { $defs: { always: true }, $ref: "#/$defs/always" };
-  assert.equal(clean(boolean), true);
-  assert.throws(() => clean({ ...boolean, title: "x" }), /object schema/);
-  assert.equal(clean({ ...boolean, title: "x", $schema: "http://json-schema.org/draft-07/schema" }), true);
-});
-
-test("schema data and map names survive expansion while schema-valued positions are resolved", () => {
-  const literal = { $ref: "https://example.invalid/literal", $schema: "data", $id: "data" };
-  const value = { type: "string" };
-  const ref = { $ref: "#/$defs/T" };
-  const schema = { $defs: { T: value }, const: literal, enum: [literal], default: literal, examples: [literal],
-    patternProperties: { $ref: ref }, dependentSchemas: { $schema: ref }, dependentRequired: { $defs: ["$ref"] },
-    dependencies: { $id: ["$schema"] }, oneOf: [{ if: ref, then: { not: ref }, else: { items: ref } }],
-    vendor: { nested: ref } };
-  const out = clean(schema);
-  for (const k of ["const", "enum", "default", "examples", "dependentRequired", "dependencies"]) assert.deepEqual(out[k], schema[k]);
-  assert.deepEqual([out.patternProperties.$ref, out.dependentSchemas.$schema, out.oneOf[0].if, out.oneOf[0].then.not,
-    out.oneOf[0].else.items, out.vendor.nested], Array(6).fill(value));
-});
-
-test("invalid references, semantics-changing siblings, scopes and unsafe expansion fail locally", () => {
-  const source = { $defs: { T: { type: "string" }, "a/b": {}, "": {}, "%zz": {} } };
-  for (const pointer of ["https://remote.invalid/schema", "#/properties/T", "#/$defs/missing", "#/$defs/a%2Fb", "#/$defs/a~2", "#/$defs/%FF"]) {
-    assert.throws(() => clean({ ...source, $ref: pointer }), /local|Pointer|UTF-8/);
-  }
-  for (const pointer of ["#/$defs/", "#/$defs/%zz", "#/%24defs/a~1b"]) assert.deepEqual(clean({ ...source, $ref: pointer }), {});
-  for (const dialect of ["http://json-schema.org/draft-04/schema#", "https://json-schema.org/draft-06/schema", "urn:custom"]) {
-    assert.throws(() => clean({ $schema: dialect }), /dialect/);
-  }
-  assert.throws(() => clean({ $schema: "https://json-schema.org/draft-07/schema", ...source, $ref: "#/$defs/T", minimum: 1 }), /only annotations/);
-  assert.throws(() => clean({ $defs: [] }), /must be an object/);
-  for (const bad of ["$schema", "$defs", "definitions", "$id"]) assert.throws(() => clean({ properties: { a: { [bad]: {} } } }), /schema location/);
-  for (const bad of ["$anchor", "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor"]) {
-    assert.throws(() => clean({ ...source, properties: { a: { [bad]: "x" } } }), /scoping keyword/);
-  }
-  assert.throws(() => clean({ $defs: { a: { $ref: "#/definitions/b" } }, definitions: { b: { $ref: "#/$defs/a" } }, $ref: "#/$defs/a" }), /cyclic/);
-  const chain = n => ({ $defs: Object.fromEntries(Array.from({ length: n }, (_, i) =>
-    ["n" + i, i + 1 === n ? { type: "string" } : { $ref: "#/$defs/n" + (i + 1) }])), $ref: "#/$defs/n0" });
-  assert.deepEqual(clean(chain(32)), { type: "string" });
-  assert.throws(() => clean(chain(33)), /32/);
-  const bulky = { $defs: { T: { examples: Array(9).fill("x".repeat(4000)) } }, $ref: "#/$defs/T" };
-  assert.doesNotThrow(() => clean(bulky));
-  const tools = ["one", "two"].map(name => ({ type: "function", function: { name, parameters: bulky } }));
-  assert.throws(() => pandaPayload({ tools },model), /copies exceed/);
-});
-
 function fakeManager(id) {
   return { source: "user-entry", getSessionId: () => id,
     buildSessionProjection() { return { entries: [{ messages: [{}], sourceEntry: { id: this.source } }] }; } };
@@ -134,7 +10,7 @@ function fakeManager(id) {
 
 function fakeNative(model, context, options) {
   const operation = (async () => {
-    const payload = await options.onPayload(context.body, model);
+    const payload = await options.onPayload?.(context.body, model) ?? context.body;
     let reply;
     for (let i = 0; i < (context.transports ?? 1); i++) {
       reply = await options.fetch(model.baseUrl, { method: "POST", headers: options.headers, body: JSON.stringify(payload) });
@@ -312,21 +188,28 @@ test("large or misleading error envelopes preserve the original response and the
   }
 });
 
-test("a nested foreign request sharing the same alias does not inherit Panda's transformations", async () => {
+
+test("ADR 0079 receives the native payload and complete replacements from peer extensions", async () => {
   const invoke = pandaStream(fakeNative, createRequestKeys(), () => {});
-  const foreign = { model: model.id, messages, store: true };
-  let sent;
-  await invoke(model, { body: { model: model.id, messages, store: false } }, {
-    apiKey: "pnd_it_a",
-    onPayload: async payload => {
-      assert.equal(beforeProviderRequest({ payload: foreign }), undefined);
-      assert.equal(foreign.store, true);
-      const normalized = beforeProviderRequest({ payload });
-      assert.equal("store" in normalized, false);
-      return { ...normalized, metadata: { addedAfterHook: true } };
-    },
-    fetch: async (_url, init) => { sent = JSON.parse(init.body); return new Response(); },
-  }).result();
-  assert.deepEqual(sent, { model: model.id, messages });
-  assert.equal(beforeProviderRequest({ payload: foreign }), undefined);
+  const schema = { $schema: "https://json-schema.org/draft/2020-12/schema",
+    $defs: { large: { description: "a".repeat(70_000) } }, properties: { name: { $ref: "#/$defs/large" } } };
+  const native = { model: model.id, tools: [], tool_choice: "auto", messages: [
+    { role: "assistant", reasoning_content: "prior reasoning", tool_calls: [{ id: "one", function: { name: "retired", arguments: "{}" } }] },
+    { role: "tool", tool_call_id: "one", content: "prior result" },
+  ] };
+  const changed = { ...native, tools: [{ type: "function", function: { name: "active", parameters: schema } }],
+    response_format: { type: "json_object" }, n: 2, logprobs: true, max_tokens: 0, max_completion_tokens: 80_000,
+    metadata: { audit: "example" }, store: false, other_option: "requires-refusal" };
+  for (const expected of [native, changed]) {
+    let observed;
+    await invoke(model, { body: native }, { apiKey: "fixture",
+      onPayload: expected === changed ? (original, actualModel) => {
+        assert.equal(original, native);
+        assert.equal(actualModel, model);
+        return changed;
+      } : undefined,
+      fetch: async (_url, init) => { observed = init.body; return new Response(); },
+    }).result();
+    assert.equal(observed, JSON.stringify(expected));
+  }
 });

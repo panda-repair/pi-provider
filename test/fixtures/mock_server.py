@@ -217,6 +217,13 @@ class Handler(BaseHTTPRequestHandler):
                 result = {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "mock"} for m in MODELS]}
                 payload = compact(result).encode()
             elif self.command == "POST" and route == "/v1/chat/completions" and isinstance(body, dict):
+                rejected = state.refusal(body) if hasattr(state, "refusal") else None
+                if rejected:
+                    status, code, param = rejected
+                    record.update(response_status=status, error_code=code, response_mode="refused", param=param)
+                    error = {"message": "Fixture refused this request.", "type": "invalid_request_error", "code": code, "param": param}
+                    self.reply(status, "application/json", compact({"error": error}).encode(), {"x-should-retry": "false"})
+                    return
                 action, run = state.recorder.admit(self.headers.get("Idempotency-Key"), body, getattr(state, "scenario", None))
                 if self.fault(action, run, record):
                     return

@@ -1,7 +1,7 @@
 import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import { readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { createPandaProvider, normalizeBaseUrl } from "./src/provider.js";
-import { beforeProviderRequest, createRequestKeys } from "./src/request.js";
+import { createRequestKeys } from "./src/request.js";
 
 export default async function pandaExtension(pi) {
   const keys = createRequestKeys();
@@ -11,7 +11,6 @@ export default async function pandaExtension(pi) {
     envToken: () => process.env.PANDA_API_TOKEN,
     keys,
   });
-  pi.on("before_provider_request", beforeProviderRequest);
   pi.on("before_agent_start", (_event, ctx) => keys.start(ctx.sessionManager));
   pi.on("agent_settled", (_event, ctx) => keys.settle(ctx.sessionManager));
   pi.on("session_shutdown", (_event, ctx) => keys.settle(ctx.sessionManager));

@@ -1,6 +1,6 @@
 # Panda for Pi
 
-Use Panda's text models, Panels and automatic routing with Pi's built-in coding tools. This package targets Pi 1.5.2.
+Use Panda's text models, Panels and automatic routing with Pi's built-in coding tools. This package targets Pi 1.5.2 and requires a Panda endpoint with ADR 0079 slice C enabled.
 
 ## Install and sign in
 
@@ -49,11 +49,7 @@ After a lost response, Panda can return an HTTP 409 replay receipt. If the earli
 
 ## Custom tool schemas
 
-The package accepts a root `$schema` for JSON Schema **2020-12**, **2019-09** or **draft-07**. Use `json-schema.org/draft/2020-12/schema`, `json-schema.org/draft/2019-09/schema` or `json-schema.org/draft-07/schema` with an `http://` or `https://` prefix. Each also accepts a single trailing `#`. The package strips the marker before sending the tool to Panda. Draft-04, draft-06, unknown dialects and a marker below the schema root fail locally before chat dispatch.
-
-Local references of the form `#/$defs/Name` and `#/definitions/Name` resolve within each tool. Modern and unmarked schemas apply annotation siblings such as `description` or `default` over the definition. Draft-07 ignores those annotations. Put validation constraints in the definition. Property names and literal values in `const`, `enum`, `default` and `examples` retain their meaning.
-
-The package expands acyclic references up to 32 levels and 65,536 bytes of copies across the request. When references expand, the written-out tool list must also fit this client-side byte limit. Remote, missing and cyclic targets produce a local error. Panda checks its documented schema subset, and `strict: true` can reject additional keywords. [Tool calling in the Panda API guide](https://panda.repair/products/llm-api#llm-api-agents-notes)
+Pi sends tool schemas, local references, dialect markers and earlier tool calls as supplied. Panda validates these against its active ADR 0079 rules. Supported root dialects include 2020-12, 2019-09 and draft-07. Slice C accepts retired-tool history and up to 128 tool declarations in 262,144 normalized bytes. Reference expansion allows up to 4,096 copies and 1 MiB of copied definitions across a request. An explicit unsupported option or conflicting output bound gets a server refusal. [Panda tool contract](https://panda.repair/products/llm-api#llm-api-agents-notes)
 
 ## Where your data goes
 
