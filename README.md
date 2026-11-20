@@ -8,7 +8,7 @@ Use Panda’s three Auto selectors and two Panels with Pi’s built-in coding to
 pi install npm:@panda-repair/pi-provider
 ```
 
-Start Pi, enter `/login panda`, and paste a personal Panda inference token beginning with `pnd_it_` at the masked prompt. Pi saves it in its credential store. For a headless session, set `PANDA_API_TOKEN` in the environment before starting Pi. The token saved by `/login` takes precedence over `PANDA_API_TOKEN`. To switch to the environment token, use `/logout`, choose Panda, and restart Pi. [Panda coding-agent guide](https://panda.repair/products/llm-api/coding-agents)
+Start Pi, enter `/login panda`, and paste a personal Panda inference token beginning with `pnd_it_` at the masked prompt. Pi saves it in its credential store. For a headless session, set `PANDA_API_TOKEN` in the environment before starting Pi. The token saved by `/login` takes precedence over `PANDA_API_TOKEN`. To switch to the environment token, use `/logout`, choose Panda, and restart Pi. [Pi setup guide](https://panda.repair/products/llm-api/coding-agents/setup#agents-pi)
 
 ```sh
 pi --list-models panda
@@ -35,7 +35,7 @@ Use the complete selector, including `panda/` and any colon. All five accept tex
 
 ## Limits and billing
 
-Pi advertises **16,384 output tokens** for all five selectors. Tool-free work such as titles and summaries can take a different route. For example, `auto:quality` can reach Gemini 4 Argon, which admits 751,413 rendered input bytes at the US$5.25 hold cap in the guide’s example. For Pi-eligible credentials, `auto` and `auto:cost` can fall back to Gemma on tool-free requests when the token omits the preferred routes. The guide’s Gemma example admits 239,616 rendered bytes. Some tool-free routes cap output at 4,096 tokens. The advertised limits are planning estimates for Pi. Panda applies the selected route’s limits to each request. [Panda coding-agent guide](https://panda.repair/products/llm-api/coding-agents)
+Pi advertises **16,384 output tokens** for all five selectors. Tool-free work such as titles and summaries can take a different route. For example, `auto:quality` can reach Gemini 4 Argon, which admits 751,413 rendered input bytes at the US$5.25 hold cap in the guide’s example. For Pi-eligible credentials, `auto` and `auto:cost` can fall back to Gemma on tool-free requests when the token omits the preferred routes. The guide’s Gemma example admits 239,616 rendered bytes. Some tool-free routes cap output at 4,096 tokens. The advertised limits are planning estimates for Pi. Panda applies the selected route’s limits to each request. [Model guidance for coding agents](https://panda.repair/products/llm-api/coding-agents/setup#agents-models)
 
 Panda counts framed UTF-8 bytes and reserves the requested output. The two Panels allow about 900,000 conversation bytes at the full output cap in the guide’s sample because synthesis needs space for member answers. A request can carry up to 1,024 messages and 65,536 bytes of system and developer instructions combined. A multi-member Panel using tools allows 1,022 caller messages, counting combined system and developer instructions as one. Tools, framing and the hold can reduce the available space. [Panda API model limits](https://panda.repair/products/llm-api#llm-api-model-limits)
 
