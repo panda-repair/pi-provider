@@ -1,11 +1,12 @@
 {
   "date": "2026-11-20",
-  "comparisonBase": "39c9e3f",
+  "comparisonBase": "93fd94f",
+  "runtimeRevision": "f2d54d41a8aeb822962e4c9d18a1828f2256573d",
   "package": "@panda-repair/pi-provider@0.1.0",
-  "scope": "Pi 1.5.2 with local transports, synthetic credentials and simulated charges",
+  "scope": "Isolated Pi 1.5.2 on macOS with loopback transports, synthetic credentials and simulated settlements",
   "sources": {
-    "serverContract": "153bfde8a901bbaf65149ec4228473bce1024a61",
-    "codingAgentGuide": "a9732484eb607c9415a1d1dbc144ccebb26c6f0a"
+    "serverContract": "31d6d025b9f24ca2769156121400c3b19dd3eff5",
+    "codingAgentGuide": "3b03e3cef1e07f0e00f09c26f6a29aca0b8062a7"
   },
   "catalog": {
     "auto": {
@@ -34,43 +35,75 @@
       "compactAbove": 207616
     }
   },
+  "versions": {
+    "pi_cli": "1.5.2",
+    "pi_ai": "1.5.2",
+    "pi_coding_agent": "1.5.2",
+    "openai": "7.19.0",
+    "node": "v24.21.0",
+    "npm": "11.19.0"
+  },
+  "releaseArchive": {
+    "name": "@panda-repair/pi-provider@0.1.0",
+    "bytes": 16712,
+    "unpackedBytes": 48576,
+    "sha256": "20535ce1f3137f82b8316693a290180e38ca48d823ebb21affa9ae59f9d33692",
+    "fileCount": 11,
+    "sourceSHA256": {
+      "LICENSE": "61f97aef30fe1f6f67e3fa62269c9889bb029e7452c5ea796512a27e38f069d4",
+      "src/catalog.js": "7fc3397e3857559b4d4ef2f6413a0cd775eb320507a9522cd5200d002f129dca",
+      "src/errors.js": "b3881b4b5d81c4481f2a52cb7aeb576d37fc444a07f2614b3b5ac47a5a491eda",
+      "index.js": "e6cfb494f79aa1df25c289e4be9799c28145418224e3f49125cc59819709ea34",
+      "src/provider.js": "391af003f905e5878b527a5ea607e7502b0fc46f843e218d4f3579afc8e8ab3c",
+      "src/request.js": "80a5dad3a86276a449344547a2d2fbd761ae75116ade47030f316bb8c170dc82",
+      "src/stream.js": "862307c24b10306eb98b460ef5f0e89566781b775802116d0b3bcba24f77d0f0",
+      "src/usage.js": "babaa436f895db972c7f5369ac762ceca9658f353d7a36d0163ee477b05919d7",
+      "package.json": "7b3e8eb306f2216053b01e78b1aff44457b8621917b08f8c7eb3a463f6ad99b8",
+      "src/routing-backend-grants.json": "be75d8e22fbb34cae2556b37877e2ff96f064b83f4c97cad6325aa90170ebe98",
+      "README.md": "b10d5b93b8853354450aa9f4e704d2d76224a190efa3db620dd7cd4337f25864"
+    }
+  },
   "checkout": {
-    "unitTests": 27,
-    "fixtureScenarios": 53,
-    "catalogGET": 55,
-    "chatPOST": 87,
-    "fileToolSelectors": [
-      "auto",
-      "auto:cost",
-      "auto:quality",
-      "panel:panda",
-      "panel:panda-quality"
-    ],
-    "faultScenarios": 19,
-    "customToolSchemaScenarios": 7,
-    "nativeHostScenarios": [
-      "summary",
-      "branch",
-      "retired",
-      "usage",
-      "timeout",
-      "malformed",
-      "stream-error",
-      "count",
-      "format",
-      "logprobs",
-      "zero",
-      "unequal",
-      "neutral",
-      "history",
-      "large",
-      "malformed-pointer",
-      "null-target",
-      "boolean-root",
-      "prefix-and-items",
-      "patterns-and-additional"
-    ],
-    "wireTargetSubstitutions": [
+    "unitTests": 25,
+    "fixtureScenarios": 75,
+    "catalogGET": 79,
+    "chatPOST": 94,
+    "fileTools": {
+      "auto": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      },
+      "auto:cost": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      },
+      "auto:quality": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      },
+      "panel:panda": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      },
+      "panel:panda-quality": {
+        "discovery": 1,
+        "chat": 2,
+        "contractViolations": 0,
+        "markerInToolResultAndFinalOutput": true
+      }
+    },
+    "faultScenarios": 32,
+    "nativeHostScenarios": 28,
+    "schemaScenarios": 7,
+    "substitutionChecks": [
       {
         "catalogGET": 1,
         "chatPOST": 0
@@ -80,7 +113,14 @@
         "chatPOST": 0
       }
     ],
-    "cacheAndPolicy": {
+    "discovery401": {
+      "catalogGET": 1,
+      "chatPOST": 0,
+      "safeCodeReported": true
+    },
+    "catalogPolicy": {
+      "customWarmListGET": 0,
+      "rotatedCustomVisible": [],
       "coldListGET": 0,
       "coldOfflinePromptGET": 0,
       "warmListGET": 0,
@@ -95,131 +135,275 @@
         "panel:panda-quality"
       ]
     },
-    "nativeSummaryStatus": {
-      "summary": {
-        "discovery": 1,
-        "http": [
-          200,
-          409,
-          200
-        ],
-        "posts": 3,
-        "keys": 2,
-        "admissions": 2
-      },
-      "branch": {
-        "discovery": 1,
-        "http": [
-          null,
-          409,
-          200
-        ],
-        "posts": 3,
-        "keys": 2,
-        "admissions": 2
-      }
-    }
-  },
-  "archive": {
-    "sha256": "1160e91d2b825c78e01b73952b6eb15f164896d8cb3066e3e9c034dbff028270",
-    "bytes": 14517,
-    "unpackedBytes": 41870,
-    "members": [
-      "LICENSE",
-      "README.md",
-      "index.js",
-      "package.json",
-      "src/catalog.js",
-      "src/errors.js",
-      "src/provider.js",
-      "src/request.js",
-      "src/routing-backend-grants.json",
-      "src/usage.js"
-    ],
-    "sourceHashes": {
-      "LICENSE": "61f97aef30fe1f6f67e3fa62269c9889bb029e7452c5ea796512a27e38f069d4",
-      "README.md": "2cfae847e050b97116e4e6922d6c5a52f5377a88c3ba8587e0e5e72623e5f5c2",
-      "index.js": "9a2a8363ccc369b42edeb2cdbd3d13ef56799499d5cdc88d0e894c578bd469e7",
-      "package.json": "7b3e8eb306f2216053b01e78b1aff44457b8621917b08f8c7eb3a463f6ad99b8",
-      "src/catalog.js": "7fc3397e3857559b4d4ef2f6413a0cd775eb320507a9522cd5200d002f129dca",
-      "src/errors.js": "68ebfdc298ae541152f355ae8c096959651b2d5f35dc81782f46afd4004e1560",
-      "src/provider.js": "2c1173b285ddb68ddf27ec64bcd07cc58b42838dc246fe63a4ee86d59029a64a",
-      "src/request.js": "7c9f1eaf809ba26553dc8bf86339d2e6e75ca28085d2e7ec3520d95d1a99a42d",
-      "src/routing-backend-grants.json": "be75d8e22fbb34cae2556b37877e2ff96f064b83f4c97cad6325aa90170ebe98",
-      "src/usage.js": "4d0c10cdaa2309a317f04bb207f3cea100b8790e2fce32156aa1c130e140af68"
-    },
-    "dryRunMatches": true
-  },
-  "priorContractVerification": {
-    "revision": "88bc3ba",
-    "serverAdmissionRequests": 17,
-    "scope": "Captured ADR 0079 slice C requests from the earlier review. Its seven-selector inventory was replaced."
-  },
-  "versions": {
-    "pi_cli": "1.5.2",
-    "pi_ai": "1.5.2",
-    "pi_coding_agent": "1.5.2",
-    "openai": "7.19.0",
-    "node": "v24.21.0",
-    "npm": "11.19.0"
+    "reportSHA256": "6adc94c9b04caa0996bdd9e0d581739a826e8eb40f4944f0a03ad02e85be2f44"
   },
   "offlineTarballAcceptance": {
-    "nativeCases": 39,
-    "catalogSessionCacheAndFileTool": 30,
-    "retainedSafetyCases": 9,
-    "totalCatalogGET": 65,
-    "totalChatPOST": 36,
-    "baselineUpgradeSetup": {
-      "catalogGET": 13,
-      "chatPOST": 5
-    },
-    "currentPackage": {
-      "catalogGET": 52,
-      "chatPOST": 31,
-      "fileToolRoundTrips": 5
-    },
-    "idleResume": {
-      "catalogGET": 0,
-      "chatPOST": 0
-    },
-    "retiredSelection": {
-      "explicitChatPOST": 0,
-      "configuredChatPOST": 0,
-      "rewrittenChatPOST": 0
-    },
-    "resumedNewPrompt": "Pi selected the permitted Auto fallback. A token with no grants produced zero Chat POSTs.",
-    "independentReportHash": "a7207a2b25e4af05c6aaf81c70b0188c5d5d494a2213c651d2796393098f264f",
-    "automaticResumeFollowup": {
-      "firstPass": {
-        "exit": 1,
-        "catalogGET": 0,
-        "chatPOST": 0,
-        "diagnostic": "No API key found for the selected model."
+    "cases": 69,
+    "assertions": 549,
+    "catalogGET": 92,
+    "chatPOST": 84,
+    "fixtureAdmissions": 55,
+    "allArchiveMembersByteIdentical": true,
+    "reportSHA256": "a6bd70ee6d8fdf54f5d9c0dbd6c155c9cfe66d62b1a02311ba7b1a3f8657f084",
+    "baselineCases": 17,
+    "selectedBaselineCases": [
+      {
+        "case": "racing-drop",
+        "POST": 3,
+        "admitted": 2,
+        "keys": "AAB"
       },
-      "additionalFreshCandidateHomes": {
-        "attempts": 4,
-        "noModel": 1
+      {
+        "case": "transformed-drop",
+        "POST": 3,
+        "admitted": 2,
+        "keys": "AAB"
       },
-      "withIdenticalCacheAndSession": {
-        "current": {
-          "attempts": 6,
-          "noModel": 1
-        },
-        "39c9e3f": {
-          "attempts": 6,
-          "noModel": 1
-        },
-        "88bc3ba": {
-          "attempts": 6,
-          "noModel": 1
-        }
+      {
+        "case": "manual-compaction",
+        "POST": 3,
+        "admitted": 2,
+        "keys": "AAB"
       },
-      "explicitAutoOnIdenticalState": {
-        "attempts": 6,
-        "completed": 6,
-        "catalogGETPerPrompt": 1,
-        "chatPOSTPerPrompt": 1
+      {
+        "case": "auto-compaction",
+        "POST": 4,
+        "admitted": 3,
+        "keys": "AABC"
+      },
+      {
+        "case": "branch-summary",
+        "POST": 3,
+        "admitted": 2,
+        "keys": "AAB"
+      },
+      {
+        "case": "virtual-paid",
+        "POST": 2,
+        "admitted": 2,
+        "keys": "AB"
+      },
+      {
+        "case": "retained-sse",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "content-filter",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AA"
+      },
+      {
+        "case": "finished-cut",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AA"
+      },
+      {
+        "case": "standalone",
+        "POST": 0,
+        "admitted": 0,
+        "keys": ""
+      },
+      {
+        "case": "receipt-twice",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AB"
+      },
+      {
+        "case": "agent-funding",
+        "POST": 3,
+        "admitted": 0,
+        "keys": "ABC"
+      },
+      {
+        "case": "discovery401",
+        "POST": 0,
+        "admitted": 0,
+        "keys": ""
+      },
+      {
+        "case": "terminal-large-user",
+        "POST": 3,
+        "admitted": 2,
+        "keys": "AAB"
+      },
+      {
+        "case": "settled-length",
+        "POST": 4,
+        "admitted": 4,
+        "keys": "ABCD"
       }
+    ],
+    "selectedFinalCases": [
+      {
+        "case": "racing-drop",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "virtual-paid",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "transformed-drop",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "manual-compaction",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "auto-compaction",
+        "POST": 2,
+        "admitted": 2,
+        "keys": "AB"
+      },
+      {
+        "case": "branch-summary",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "retained-sse",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "retained-malformed",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "content-filter",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "finished-cut",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "standalone",
+        "POST": 2,
+        "admitted": 2,
+        "keys": "AB"
+      },
+      {
+        "case": "receipt-twice",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AB"
+      },
+      {
+        "case": "agent-funding",
+        "POST": 1,
+        "admitted": 0,
+        "keys": "A"
+      },
+      {
+        "case": "throttle-concurrent",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AA"
+      },
+      {
+        "case": "throttle-workspace",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AA"
+      },
+      {
+        "case": "throttle-ceiling",
+        "POST": 3,
+        "admitted": 0,
+        "keys": "AAA"
+      },
+      {
+        "case": "discovery401",
+        "POST": 0,
+        "admitted": 0,
+        "keys": ""
+      },
+      {
+        "case": "receipt-persisted",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AB"
+      },
+      {
+        "case": "terminal-large-user",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "settled-length",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "parallel-standalone",
+        "POST": 2,
+        "admitted": 2,
+        "keys": "AB"
+      },
+      {
+        "case": "manual-paid-summary",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "branch-paid-summary",
+        "POST": 1,
+        "admitted": 1,
+        "keys": "A"
+      },
+      {
+        "case": "throttle-to-loss",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AA"
+      },
+      {
+        "case": "throttle-to-paid",
+        "POST": 2,
+        "admitted": 1,
+        "keys": "AA"
+      }
+    ],
+    "documentedHostLimits": [
+      "A failed preventive threshold summary does not cancel the originally requested, separate foreground call. A threshold hook after an already-failed oversized foreground turn sends no new request.",
+      "Pi 1.5.2 discards failed manual/branch summary messages: the model supplies the validated error usage and reports the charge, but the native saved session and /session spending omit it."
+    ]
+  },
+  "earlierVerification": {
+    "revision": "93fd94f",
+    "archiveSHA256": "1160e91d2b825c78e01b73952b6eb15f164896d8cb3066e3e9c034dbff028270",
+    "unitTests": 27,
+    "checkoutScenarios": 53,
+    "independentInstallScenarios": 39,
+    "savedRetiredSession": {
+      "implicitNoModelFailuresPerVersion": "1 of 6 on each of 93fd94f, 39c9e3f and 88bc3ba",
+      "explicitPandaAutoRecovery": "6 of 6 in the historical test"
     }
   },
   "routingGrantSource": {
