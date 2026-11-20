@@ -13,7 +13,7 @@ function fakeNative(model, context, options) {
     const payload = await options.onPayload?.(context.body, model) ?? context.body;
     let reply;
     for (let i = 0; i < (context.transports ?? 1); i++) {
-      reply = await options.fetch(model.baseUrl, { method: "POST", headers: options.headers, body: JSON.stringify(payload) });
+      reply = await options.fetch(model.baseUrl + "/chat/completions", { method: "POST", headers: { ...options.headers, Authorization: "Bearer " + options.apiKey }, body: JSON.stringify(payload) });
     }
     return { stopReason: reply.ok ? "stop" : "error" };
   })();
@@ -70,7 +70,7 @@ function retryHarness() {
       let stopReason = "error";
       for (const next of responses) {
         try {
-          const reply = await options.fetch(target.baseUrl, { method: "POST", body: "{}" });
+          const reply = await options.fetch(target.baseUrl + "/chat/completions", { method: "POST", body: "{}", headers: { authorization: "Bearer " + options.apiKey } });
           observed.push({ status: reply.status, headers: reply.headers, body: await reply.text() });
           stopReason = reply.ok && !next?.cut ? "stop" : "error";
         } catch {
@@ -212,4 +212,18 @@ test("ADR 0079 receives the native payload and complete replacements from peer e
     }).result();
     assert.equal(observed, JSON.stringify(expected));
   }
+});
+
+test("mismatched chat destinations and Authorization overrides cannot use the granted credential", async () => {
+  let sent = 0;
+  for (const [target, value] of [["http://elsewhere.invalid/v1/chat/completions", "Bearer secret"],
+      [model.baseUrl + "/chat/completions", "Bearer another"]]) {
+    const run = pandaStream((_m, _c, options) => {
+      const result = options.fetch(target, { headers: { authorization: value }, body: "{}" });
+      return { result: () => result };
+    }, createRequestKeys(), () => {});
+    const events = run(model, {}, { apiKey: "secret", fetch: () => { sent++; } });
+    await assert.rejects(events.result(), /mismatched endpoint or credential/);
+  }
+  assert.equal(sent, 0);
 });

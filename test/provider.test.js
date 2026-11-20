@@ -9,15 +9,17 @@ const signal = new AbortController().signal;
 
 function rig() {
   let key = "pnd_it_local";
+  let stored;
   let response = () => Response.json({ data: [{ id: "auto" }, { id: "glm-5.3" }, { id: "foreign" }] });
   const requests = [];
   const streams = { stream() { throw new Error("Transport called"); }, streamSimple() { throw new Error("Transport called"); } };
-  const provider = createPandaProvider({ baseUrl, streams, envToken: () => key,
+  const provider = createPandaProvider({ baseUrl, streams,
     fetchImpl: async (url, options) => { requests.push({ url, ...options }); return response(); } });
   const refresh = (options = {}) => provider.refreshModels({
-    allowNetwork: true, signal, publish: async ({ update }) => { update(); return true; }, ...options,
+    allowNetwork: true, credential: key ? { type: "api_key", key } : undefined, stored, signal,
+    publish: async ({ update, persist }) => { if (persist !== undefined) stored = persist; update(); return true; }, ...options,
   });
-  return { provider, refresh, requests, key: value => { key = value; }, respond: fn => { response = fn; } };
+  return { provider, refresh, requests, key: value => { key = value; }, respond: fn => { response = fn; }, cached: () => stored };
 }
 
 test("the seven allowed, text-only models use the Panda adapter and their per-selector compaction windows", () => {
@@ -71,22 +73,22 @@ test("native API-key login masks and validates the pasted token, with stored cre
 
 test("authorized discovery intersects the static catalog, filters composed rows and gates explicit ID fallbacks", async () => {
   const { provider, refresh, requests } = rig();
-  assert.deepEqual(provider.getModels(), []);
+  assert.deepEqual(provider.filterModels(provider.getModels(), undefined), []);
   await refresh();
   assert.equal(requests[0].headers.Authorization, "Bearer pnd_it_local");
   assert.equal(requests[0].url, baseUrl + "/models");
   assert.equal(requests[0].signal, signal);
   assert.equal(requests[0].redirect, "error");
-  assert.deepEqual(provider.getModels().map(m => m.id), ["glm-5.3", "auto"]);
-  const allowed = provider.getModels()[0];
+  assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["glm-5.3", "auto"]);
+  const allowed = provider.filterModels(provider.getModels(), undefined)[0];
   const unavailable = { ...allowed, id: "auto:quality" };
   const unknown = { ...allowed, id: "other" };
   assert.deepEqual(provider.filterModels([allowed, unknown, unavailable], undefined), [allowed]);
   assert.deepEqual(provider.filterModels([allowed], { key: "pnd_it_other" }), []);
   for (const entry of [unavailable, unknown, { ...allowed, baseUrl: "https://another.test/v1" }]) {
-    assert.throws(() => provider.streamSimple(entry, {}, { apiKey: "pnd_it_local" }), /does not list/);
+    assert.throws(() => provider.streamSimple(entry, {}, { apiKey: "pnd_it_local" }), /no cached grant/);
   }
-  assert.throws(() => provider.stream(allowed, {}, { apiKey: "pnd_it_another" }), /does not list/);
+  assert.throws(() => provider.stream(allowed, {}, { apiKey: "pnd_it_another" }), /no cached grant/);
   assert.throws(() => provider.stream(allowed, {}, { apiKey: "pnd_it_local" }), /Transport called/);
 });
 
@@ -95,16 +97,16 @@ test("failed, switched, or removed credentials cannot retain a previous model gr
   await refresh();
   await refresh({ allowNetwork: false });
   assert.equal(requests.length, 1);
-  assert.equal(provider.getModels().length, 2);
+  assert.equal(provider.filterModels(provider.getModels(), undefined).length, 2);
   key("pnd_it_new");
   await refresh({ allowNetwork: false });
-  assert.deepEqual(provider.getModels(), []);
+  assert.deepEqual(provider.filterModels(provider.getModels(), undefined), []);
   respond(() => Response.json({ data: [{ id: "panel:panda" }] }));
   await refresh();
-  assert.deepEqual(provider.getModels().map(m => m.id), ["panel:panda"]);
+  assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["panel:panda"]);
   respond(() => new Response("private error detail", { status: 403 }));
   await assert.rejects(refresh(), { message: "Panda model discovery returned HTTP 403." });
-  assert.deepEqual(provider.getModels(), []);
+  assert.deepEqual(provider.filterModels(provider.getModels(), undefined), []);
   key(undefined);
   const previous = requests.length;
   await refresh();
@@ -116,5 +118,50 @@ test("a rejected generation cannot overwrite the current catalog", async () => {
   await refresh();
   respond(() => Response.json({ data: [{ id: "panel:panda-quality" }] }));
   await refresh({ publish: async () => false });
-  assert.deepEqual(provider.getModels().map(m => m.id), ["glm-5.3", "auto"]);
+  assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["glm-5.3", "auto"]);
+});
+
+test("router IDs require a listed coding route and the router's own grant", () => {
+  const routers = ["auto", "auto:cost", "auto:quality"];
+  const get = ids => permittedModels(ids.map(id => ({ id })), baseUrl).map(row => row.id);
+  assert.deepEqual(get([...routers, "gemma-4-26b", "panel:panda-quality"]), ["panel:panda-quality"]);
+  assert.deepEqual(get(["glm-5.3"]), ["glm-5.3"]);
+  for (const id of ["glm-5.3", "deepseek-v4.1-flash", "panel:panda"]) {
+    for (const router of routers) assert.ok(get([router, id]).includes(router));
+  }
+});
+
+test("host-only discovery binds cached grants to resolved endpoint, scoped credential and rotation", async () => {
+  const { provider, refresh, requests, cached } = rig();
+  await refresh({ allowNetwork: false, credential: undefined });
+  assert.equal(requests.length, 0);
+  const override = "http://localhost:4999/staging/v1";
+  let scoped = "pnd_it_staging";
+  const auth = () => provider.auth.apiKey.resolve({ signal, ctx: { env: async () => scoped } });
+  await auth();
+  await refresh({ baseUrl: override, credential: { key: scoped } });
+  assert.equal(requests[0].url, override + "/models");
+  const snapshot = cached();
+  assert.ok(!JSON.stringify(snapshot).includes(scoped));
+  await refresh({ allowNetwork: false, baseUrl: override, credential: undefined });
+  await auth();
+  assert.equal(provider.filterModels(snapshot.models, undefined).length, 2);
+  scoped = "pnd_it_rotated";
+  await auth();
+  assert.deepEqual(provider.filterModels(snapshot.models, undefined), []);
+  scoped = undefined;
+  await auth();
+  assert.deepEqual(provider.filterModels(snapshot.models, undefined), []);
+  await refresh({ allowNetwork: false, baseUrl, credential: { key: "pnd_it_staging" } });
+  assert.deepEqual(provider.filterModels(snapshot.models, { key: "pnd_it_staging" }), []);
+  assert.equal(requests.length, 1);
+});
+
+test("discovery failures expose no upstream body or transport details", async () => {
+  const { refresh, respond, provider } = rig();
+  for (const supply of [() => new Response("private-marker"), () => { throw Error("private-marker"); }]) {
+    respond(supply);
+    await assert.rejects(refresh(), { message: "Could not read the Panda model catalog. Check your endpoint and credentials." });
+    assert.deepEqual(provider.filterModels(provider.getModels(), undefined), []);
+  }
 });

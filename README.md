@@ -17,7 +17,7 @@ pi --model panda/panel:panda
 
 To install a local checkout, run `pi install /path/to/pi-provider` with its absolute path.
 
-The package authenticates to `GET /v1/models` at startup. The list contains only supported selectors available to the current token. A missing token, a failed discovery or a fresh offline session leaves the list empty. Restart Pi to refresh access after a workspace grant changes. In Pi 1.5.2, use the interactive `/login` command for this extension.
+Startup and `--list-models` read Pi's catalog cache. A new login or an explicit Panda prompt can refresh `GET /v1/models` using Pi's selected endpoint, effective credential and network policy. A cold list can be empty. Start Pi with `--model panda/glm-5.3` or use interactive `/login panda` to establish the catalog. Cached grants are bound to the credential and endpoint. Automatic selectors appear in the picker only when the token also has a tool-capable route.
 
 Requests go to `https://app.panda.repair/v1` by default. For staging, set `PANDA_BASE_URL` to the trusted staging API base including its `/v1` path before starting Pi. Both discovery and chat send the bearer token to that address.
 

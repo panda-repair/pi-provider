@@ -116,13 +116,18 @@ export function pandaStream(stream, keys, assertAvailable) {
     const events = stream(model, context, {
       ...options,
       async fetch(input, init) {
+        const target = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
+        const headers = new Headers(init?.headers ?? input?.headers);
+        if (target !== model.baseUrl.replace(/\/+$/, "") + "/chat/completions" ||
+            headers.get("authorization") !== "Bearer " + options.apiKey) {
+          throw new Error("Panda refused a request with a mismatched endpoint or credential.");
+        }
         attempt ??= keys.reserve(options.sessionId, model, options.apiKey, init?.body);
         if (attempt.receipt) return receiptResponse(attempt.receipt);
         if (attempt.fresh) attempt.key = randomUUID();
         attempt.fresh = false;
-        const headers = new Headers(init?.headers ?? input?.headers);
         headers.set("Idempotency-Key", attempt.key);
-        const response = await send(input, { ...init, headers });
+        const response = await send(input, { ...init, headers, redirect: "error" });
         return classifyResponse(attempt, response);
       },
     });

@@ -25,7 +25,8 @@ export const compat = {
 export function permittedModels(data, baseUrl) {
   if (!Array.isArray(data)) throw new Error("Panda model discovery returned an invalid model list.");
   const allowed = new Set(data.map(entry => entry?.id));
-  return catalog.filter(model => allowed.has(model.id)).map(model => ({
+  const toolRoute = ["panel:panda", "glm-5.3", "deepseek-v4.1-flash"].some(id => allowed.has(id));
+  return catalog.filter(model => allowed.has(model.id) && (!model.id.startsWith("auto") || toolRoute)).map(model => ({
     ...model,
     cost: { ...model.cost },
     type: "chat",
