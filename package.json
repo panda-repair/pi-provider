@@ -1,0 +1,22 @@
+{
+  "name": "@panda-repair/pi-provider",
+  "version": "0.1.0",
+  "description": "Use Panda models, Panels and automatic routing in Pi.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./index.js"]
+  },
+  "files": ["index.js", "src", "README.md"],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

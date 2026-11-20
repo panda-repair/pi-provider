@@ -1,0 +1,141 @@
+{
+  "versions": {
+    "pi_cli": "1.5.2",
+    "pi_ai": "1.5.2",
+    "pi_coding_agent": "1.5.2",
+    "openai": "7.19.0",
+    "node": "v24.21.0",
+    "npm": "11.19.0"
+  },
+  "contractRevision": "cb676cac",
+  "environment": "Loopback-only macOS sandbox; synthetic inference credentials",
+  "localPathInstall": {
+    "glm-5.3": {
+      "discovery": 1,
+      "chat": 2,
+      "contractViolations": 0,
+      "markerInToolResultAndFinalOutput": true
+    },
+    "deepseek-v4.1-flash": {
+      "discovery": 1,
+      "chat": 2,
+      "contractViolations": 0,
+      "markerInToolResultAndFinalOutput": true
+    },
+    "auto": {
+      "discovery": 1,
+      "chat": 2,
+      "contractViolations": 0,
+      "markerInToolResultAndFinalOutput": true
+    },
+    "auto:cost": {
+      "discovery": 1,
+      "chat": 2,
+      "contractViolations": 0,
+      "markerInToolResultAndFinalOutput": true
+    },
+    "auto:quality": {
+      "discovery": 1,
+      "chat": 2,
+      "contractViolations": 0,
+      "markerInToolResultAndFinalOutput": true
+    },
+    "panel:panda": {
+      "discovery": 1,
+      "chat": 2,
+      "contractViolations": 0,
+      "markerInToolResultAndFinalOutput": true
+    },
+    "panel:panda-quality": {
+      "discovery": 1,
+      "chat": 2,
+      "contractViolations": 0,
+      "markerInToolResultAndFinalOutput": true
+    }
+  },
+  "independentWireChecks": {
+    "scenarios": 21,
+    "getModels": 25,
+    "chatPosts": 27,
+    "requests": 52,
+    "contractViolations": 0,
+    "transportAndAgentRetry": {
+      "glm-5-3-retry": {
+        "status": 503,
+        "byte_identical_body": true,
+        "same_key": true,
+        "new_key_after_tool": true
+      },
+      "dropped-connection": {
+        "status": "connection closed before response",
+        "byte_identical_body": true,
+        "same_key": true,
+        "new_key_after_tool": true
+      },
+      "provider-retry": {
+        "status": 503,
+        "byte_identical_body": true,
+        "same_key": true,
+        "new_key_after_tool": true
+      }
+    },
+    "newSessionWithIdenticalRequest": {
+      "sameBody": true,
+      "differentKey": true
+    },
+    "changedBodyAfterDisconnect": {
+      "temperatures": [
+        0.2,
+        0.3
+      ],
+      "distinctKeyCount": 1,
+      "replayHttpStatus": 409,
+      "piExit": 1
+    },
+    "sameProcessCatalogSizes": [
+      7,
+      2,
+      0
+    ],
+    "explicitIds": {
+      "denied-selector": {
+        "selector": "panda/auto:quality",
+        "exit": 1,
+        "chatPosts": 0
+      },
+      "denied-unknown": {
+        "selector": "panda/fixture-unknown",
+        "exit": 1,
+        "chatPosts": 0
+      }
+    }
+  },
+  "otherProviderControl": {
+    "sameWireModel": "glm-5.3",
+    "posts": 2,
+    "retainedStore": true,
+    "withoutPandaIdempotencyKey": true
+  },
+  "pack": {
+    "files": [
+      "README.md",
+      "index.js",
+      "package.json",
+      "src/catalog.js",
+      "src/provider.js",
+      "src/request.js"
+    ],
+    "sourceSha256": {
+      "README.md": "a00035f736f9df5aaf5afb301497f3aa5f352b1ba11b070b482e275d5a402d00",
+      "index.js": "290c442c5571b7c53486a88ad20f61db1f946806d721ec00f8a764aa591792fa",
+      "package.json": "ef8157232eec3d909ffef40eff54ddea605d02cf0b3b6f8e3770c1f4bdbdecc2",
+      "src/catalog.js": "9498a6a01b0c194d6f97be6c4107e1cf78492902b6020784af6481cbdc4a0cb5",
+      "src/provider.js": "4c0192191b7d7ee67ced29897ac0b6d4de447d5d7d33c93db04908cbb8e792eb",
+      "src/request.js": "e97a1f6871cf95444a66903328972e0b5f4f27139fb5179f1ac71b738ae09ff1"
+    },
+    "archiveSha256": "32aea86190d032d5853dfd09e1cb527fef5f92c0d6ae1380077579cbd132c025",
+    "freshInstallModel": "panda/panel:panda-quality",
+    "markerRoundTrip": true,
+    "contractViolations": 0
+  }
+}
