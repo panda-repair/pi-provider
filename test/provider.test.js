@@ -123,6 +123,59 @@ test("a rejected generation cannot overwrite the current catalog", async () => {
   assert.deepEqual(provider.filterModels(provider.getModels(), undefined).map(m => m.id), ["auto", "auto:cost"]);
 });
 
+test("command grants require a matching published refresh with no stored credential", async () => {
+  const runtime = {};
+  const source = { command: "!fixture", runtime };
+  let active = source;
+  const setup = rig(() => active);
+  const all = modelDefinitions(baseUrl);
+  const visible = credential => setup.provider.filterModels(all, credential).map(row => row.id);
+  const restore = (signal, credential, url = baseUrl) => setup.refresh({ signal, credential, baseUrl: url, allowNetwork: false });
+  const online = (signal, key, overrides) => setup.refresh({ signal, credential: { type: "api_key", key }, ...overrides });
+  const signalA = new AbortController().signal;
+  const signalB = new AbortController().signal;
+  await restore(signalA);
+  await online(signalA, "pnd_it_a");
+  assert.deepEqual(visible(), ["auto", "auto:cost"]);
+  assert.deepEqual(visible({ key: "pnd_it_b" }), []);
+  assert.throws(() => setup.provider.streamSimple(all[0], {}, { apiKey: "pnd_it_b" }), /no cached grant/);
+  for (active of [{ ...source, command: "!other" }, { ...source, runtime: {} }, {}]) assert.deepEqual(visible(), []);
+  active = source;
+
+  const stored = { type: "api_key", key: "pnd_it_saved" };
+  await restore(signalB, stored);
+  await online(signalB, stored.key);
+  assert.deepEqual(visible(stored), ["auto", "auto:cost"]);
+  assert.deepEqual(visible(), []); // Logging out cannot turn the saved login into a command grant.
+
+  await restore(signalB);
+  await online(signalA, "pnd_it_a", { publish: async () => false });
+  assert.deepEqual(visible(), []);
+  await online(signalB, "pnd_it_b", { baseUrl: baseUrl + "/elsewhere" });
+  assert.deepEqual(setup.provider.filterModels(modelDefinitions(baseUrl + "/elsewhere")), []);
+  await restore(signalA);
+  await online(signalB, "pnd_it_b");
+  assert.deepEqual(visible(), []); // A network phase alone cannot identify a command credential.
+
+  await restore(signalB);
+  setup.respond(() => Response.json({ data: [{ id: "panel:panda-quality" }] }));
+  await online(signalB, "pnd_it_b");
+  assert.deepEqual(visible(), ["panel:panda-quality"]);
+  const snapshot = setup.cached();
+  assert.ok(!JSON.stringify(snapshot).includes(source.command));
+  assert.ok(!JSON.stringify(snapshot).includes("pnd_it_b"));
+  const fresh = rig(() => source);
+  await fresh.refresh({ allowNetwork: false, stored: snapshot, credential: undefined });
+  assert.deepEqual(fresh.provider.filterModels(all), []);
+  assert.equal(fresh.requests.length, 0);
+
+  await restore(signalA); // A command can fail before Pi calls the network phase.
+  assert.deepEqual(visible(), []);
+  setup.respond(() => new Response(null, { status: 401 }));
+  await assert.rejects(online(signalA, "pnd_it_a"), /HTTP 401/);
+  assert.deepEqual(visible(), []);
+});
+
 test("router IDs require a listed coding route and the router's own grant", () => {
   const routers = ["auto", "auto:cost", "auto:quality"];
   assert.equal(new Set(backendGrants).size, 2);

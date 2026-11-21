@@ -247,18 +247,20 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(raw_text) if raw_text else None
             except ValueError:
                 body = None
-            record.update(body=body, raw_body=raw_text, body_bytes=len(raw),
-                          fixture_bearer_verified=self.headers.get("Authorization") == "Bearer " + state.expected_token)
+            grants = getattr(state, "credential_models", {state.expected_token: getattr(state, "models", MODELS)})
+            authorization = self.headers.get("Authorization", "")
+            token = authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else None
+            record.update(body=body, raw_body=raw_text, body_bytes=len(raw), fixture_bearer_verified=token in grants)
             route = urlsplit(self.path).path
             status, content_type = 200, "application/json"
             if self.command == "GET" and route == "/v1/models":
                 record.update(response_mode="models")
-                if state.scenario == "discovery-401":
+                if state.scenario == "discovery-401" or token not in grants:
                     record.update(response_status=401)
                     self.reply(401, "application/json", compact({"error": {"code": "inference_token_invalid",
                         "message": "private-marker-token"}}).encode())
                     return
-                result = {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "mock"} for m in getattr(state, "models", MODELS)]}
+                result = {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "mock"} for m in grants[token]]}
                 payload = compact(result).encode()
             elif self.command == "POST" and route == "/v1/chat/completions" and isinstance(body, dict):
                 rejected = state.refusal(body) if hasattr(state, "refusal") else None

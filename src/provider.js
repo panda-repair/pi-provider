@@ -55,6 +55,8 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
   let effective;
   let resolvedDefault;
   let checkedDefault;
+  let commandRefresh;
+  let verifiedCommand;
   let cached;
   let discoveryFailure;
   let granted = [];
@@ -65,6 +67,8 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
     cached = Array.isArray(entry?.models) && /^panda-v[12]-[a-f0-9]{64}$/.test(entry.etag) ? entry.etag : undefined;
     granted = [];
     checkedDefault = undefined;
+    commandRefresh = undefined;
+    verifiedCommand = undefined;
     if (!cached) return;
     if (cached.startsWith("panda-v1-")) {
       // Versions with a seven-model catalog stored backend entitlements as model rows.
@@ -104,11 +108,11 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
   }
 
   function filterModels(models, credential) {
-    // Pi's composed picker supplies only a stored credential. A simple custom
-    // models.json environment binding can be checked locally even during a cache-only list.
     const configured = credential?.key ? undefined : pickerKey?.();
     const local = configured ? expectedTag(inferenceToken(configured.key)) : undefined;
     const identity = credential?.key ? expectedTag(inferenceToken(credential.key)) :
+      configured?.command ? (!credential && verifiedCommand?.command === configured.command &&
+        verifiedCommand.runtime === configured.runtime ? cached : undefined) :
       configured?.unbound ? checkedDefault :
       !configured || (configured.defaultEnv && effective && local === resolvedDefault) ? effective : local;
     if (!cached || identity !== cached) return [];
@@ -150,6 +154,10 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
           discoveryFailure = undefined;
           restore(url, stored);
           effective = expectedTag(key);
+          // Pi uses one signal for both phases. Only the first phase reveals
+          // whether a stored credential took precedence over the configured command.
+          const source = !credential && pickerKey?.();
+          commandRefresh = source?.command ? { source, signal, url } : undefined;
         } });
         return;
       }
@@ -175,7 +183,12 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
         void response.body?.cancel().catch(() => {});
         const models = permittedModels(body?.data, url);
         const entry = { etag: grantTag(url, key, models), models, checkedAt: Date.now() };
-        await publish({ persist: entry, update() { restore(url, entry); effective = entry.etag; } });
+        await publish({ persist: entry, update() {
+          const source = commandRefresh?.signal === signal && commandRefresh.url === url ? commandRefresh.source : undefined;
+          restore(url, entry);
+          effective = entry.etag;
+          verifiedCommand = source;
+        } });
       } catch (error) {
         if (signal.aborted) return;
         const message = error instanceof DiscoveryError ? error.message : "Could not read the Panda model catalog. Check your endpoint and credentials.";

@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 const [dist, mode, id] = process.argv.slice(2);
 const pi = await import(pathToFileURL(join(dist, "index.js")));
 const signal = AbortSignal.timeout(30_000);
-if (mode === "picker-env" || mode === "picker-config") {
+if (["picker-env", "picker-config", "picker-command"].includes(mode)) {
   const { checkVisiblePicker } = await import("./sdk-picker.mjs");
   await checkVisiblePicker(pi, signal, dist, mode);
   process.exit(0);

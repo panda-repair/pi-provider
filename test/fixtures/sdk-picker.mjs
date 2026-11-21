@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { registerHooks } from "node:module";
@@ -12,12 +13,37 @@ function copyPackageSettings(stock, agentDir) {
   writeFileSync(join(agentDir, "settings.json"), JSON.stringify(settings));
 }
 
+async function renderedPicker(dist, selected, runtime) {
+  const directory = join(dist, "modes", "interactive");
+  const { initTheme } = await import(pathToFileURL(join(directory, "theme", "theme.js")));
+  const { ModelSelectorComponent } = await import(pathToFileURL(join(directory, "components", "model-selector.js")));
+  initTheme("dark");
+  const refreshed = Promise.withResolvers();
+  let picker;
+  const ui = { requestRender() { if (picker) refreshed.resolve(); } };
+  picker = new ModelSelectorComponent(ui, selected, runtime, [], () => {}, () => {}, "panda");
+  try {
+    await refreshed.promise;
+    return picker.render(120).map(stripVTControlCharacters).filter(line => line.includes("[panda]"))
+      .map(line => line.match(/\b(?:auto[\w:-]*|panel:[\w:-]+)\b/)?.[0]).sort();
+  } finally { picker.dispose(); }
+}
+
 export async function checkVisiblePicker(pi, signal, dist, mode) {
   const cwd = process.cwd();
   const agentDir = join(cwd, mode);
   mkdirSync(agentDir, { recursive: true });
   copyPackageSettings(process.env.PI_CODING_AGENT_DIR, agentDir);
-  if (mode === "picker-config") {
+  const token = process.env.PANDA_API_TOKEN;
+  if (mode === "picker-command") {
+    delete process.env.PANDA_API_TOKEN;
+    process.env.PANDA_FIXTURE_HELPER_DIR = agentDir;
+    writeFileSync(join(agentDir, "calls"), "");
+    writeFileSync(join(agentDir, "helper.sh"), 'printf x >> "$PANDA_FIXTURE_HELPER_DIR/calls"\ncat "$PANDA_FIXTURE_HELPER_DIR/token"\n');
+    writeFileSync(join(agentDir, "models.json"), JSON.stringify({
+      providers: { panda: { apiKey: '!sh "$PANDA_FIXTURE_HELPER_DIR/helper.sh"' } },
+    }));
+  } else if (mode === "picker-config") {
     process.env.PANDA_FIXTURE_PICKER = process.env.PANDA_API_TOKEN;
     delete process.env.PANDA_API_TOKEN;
     writeFileSync(join(agentDir, "models.json"), JSON.stringify({ providers: { panda: { apiKey: "$PANDA_FIXTURE_PICKER" } } }));
@@ -29,27 +55,41 @@ export async function checkVisiblePicker(pi, signal, dist, mode) {
   const { session } = await pi.createAgentSessionFromServices({
     services, model: selected, sessionManager: pi.SessionManager.inMemory(cwd), noTools: "all",
   });
-  let picker;
   try {
     await session.bindExtensions({ mode: "print" });
-    const directory = join(dist, "modes", "interactive");
-    const { initTheme } = await import(pathToFileURL(join(directory, "theme", "theme.js")));
-    const { ModelSelectorComponent } = await import(pathToFileURL(join(directory, "components", "model-selector.js")));
-    initTheme("dark");
-    const refreshed = Promise.withResolvers();
-    const ui = { requestRender() { if (picker) refreshed.resolve(); } };
-    picker = new ModelSelectorComponent(ui, selected, runtime, [], () => {}, () => {}, "panda");
-    await refreshed.promise;
-    const rows = picker.render(120).map(stripVTControlCharacters).filter(line => line.includes("[panda]"));
-    assert.equal(rows.length, 1);
-    assert.match(rows[0], /auto:cost/);
     const context = { messages: [{ role: "user", content: "Denied fixture request.", timestamp: 1 }] };
+    if (mode === "picker-command") {
+      const calls = () => readFileSync(join(agentDir, "calls")).length;
+      const available = async () => (await runtime.getAvailable("panda", { signal })).map(row => row.id).sort();
+      const cases = [[token, ["auto:cost"]], [token + "_panel", ["panel:panda-quality"]], [token + "_empty", []]];
+      assert.deepEqual(await available(), []);
+      assert.equal(calls(), 0);
+      for (const [index, [key, expected]] of cases.entries()) {
+        writeFileSync(join(agentDir, "token"), key);
+        assert.deepEqual(await renderedPicker(dist, selected, runtime), expected);
+        assert.deepEqual(await available(), expected);
+        // An explicit request supplies the exact credential to check without another helper run.
+        const refusal = await runtime.complete(index ? selected : denied, context, { apiKey: key, signal });
+        assert.match(refusal.errorMessage, /no cached grant/);
+        if (!index) {
+          const fresh = spawnSync(process.execPath, [join(dist, "bundle", "cli.js"), "--list-models", "panda"], {
+            env: { ...process.env, PI_CODING_AGENT_DIR: agentDir }, encoding: "utf8", timeout: 15000,
+          });
+          assert.equal(fresh.status, 0);
+          const count = fresh.stdout.split("\n").filter(line => /^panda\s/.test(line)).length;
+          assert.ok(count === 0 || count === 5, "A fresh command cannot identify the one cached grant");
+        }
+        assert.equal(calls(), index + 1);
+      }
+      console.log(JSON.stringify({ picker: mode, visible: cases.map(([, ids]) => ids), helperCalls: calls() }));
+      return;
+    }
+    assert.deepEqual(await renderedPicker(dist, selected, runtime), ["auto:cost"]);
     const refusal = await runtime.complete(denied, context, { signal });
     assert.equal(refusal.stopReason, "error");
     assert.match(refusal.errorMessage, /no cached grant/);
     console.log(JSON.stringify({ picker: mode, visible: ["auto:cost"], denied: denied.id }));
   } finally {
-    picker?.dispose();
     session.dispose();
   }
 }

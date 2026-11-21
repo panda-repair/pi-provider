@@ -10,10 +10,16 @@ import { settlementAccounting } from "./src/usage.js";
 
 const verifiedPickerHost = ["1.5.2", "1.6.0"].includes(VERSION);
 
-// Pi checks that configured variables exist when listing, but passes only stored
-// credentials into filterModels. Resolve only the literal or variables explicitly
-// named in Panda’s configuration. Leave credential commands to the inference path.
-function pickerCredential(spec) {
+// Picker lookups can read literals and named variables. Only Pi may run a command.
+function pickerCredential(spec, runtime) {
+  if (typeof spec === "string" && spec.startsWith("!")) {
+    if (typeof runtime?.getProviderAuthStatus === "function" && typeof runtime.getRegisteredProviderConfig === "function" &&
+        runtime.getProviderAuthStatus("panda")?.source === "models_json_command" &&
+        runtime.getRegisteredProviderConfig("panda")?.apiKey === undefined) {
+      return { command: spec, runtime };
+    }
+    return {};
+  }
   return spec === undefined ? { defaultEnv: true, key: process.env.PANDA_API_TOKEN }
     : { key: configuredToken(spec, name => process.env[name]) };
 }
@@ -54,7 +60,7 @@ export default async function pandaExtension(pi, callerRuntime) {
       const config = runtime ? runtime.config : cliConfig;
       if (typeof config?.getProvider !== "function" ||
           typeof config.getError !== "function" || config.getError()) return {};
-      return pickerCredential(config.getProvider("panda")?.apiKey);
+      return pickerCredential(config.getProvider("panda")?.apiKey, runtime);
     },
     canDisplay(text) {
       const failure = { stopReason: "error", errorMessage: text };
