@@ -7,7 +7,12 @@ const pi = await import(pathToFileURL(join(dist, "index.js")));
 const signal = AbortSignal.timeout(30_000);
 if (mode === "sdk-picker") {
   const { checkSdkPicker } = await import("./sdk-picker.mjs");
-  await checkSdkPicker(pi, signal);
+  await checkSdkPicker(pi, signal, dist);
+  process.exit(0);
+}
+if (mode.startsWith("saved-")) {
+  const { checkSavedUsage } = await import("./saved-usage.mjs");
+  await checkSavedUsage(pi, signal, mode);
   process.exit(0);
 }
 const services = await pi.createAgentSessionServices({
@@ -54,11 +59,11 @@ if (["summary", "branch", "summary-length", "branch-length"].includes(mode)) {
       if (mode==="paid-compaction") await session.compact();
       else await session.navigateTree(users[0],{summarize:true});
       const entries=pi.SessionManager.open(manager.getSessionFile(),saved,process.cwd()).getEntries();
-      const record=entries.find(e=>e.type==="custom"&&e.customType==="panda.checkpoint_receipts");
-      const checkpoint=entries.find(e=>e.id===record?.data.checkpointId);
-      assert.equal(checkpoint?.type,mode==="paid-compaction"?"compaction":"branch_summary");
-      assert.equal(new Set(record.data.runIds).size,mode==="paid-compaction"?2:1);
-      assert.equal(checkpoint.usage.cost.total,record.data.runIds.length*.03);
+      const checkpoint=entries.find(e=>e.type===(mode==="paid-compaction"?"compaction":"branch_summary"));
+      const record=entries.find(e=>e.type==="custom"&&e.customType==="panda.checkpoint_receipts"&&e.data.checkpointId===checkpoint.id);
+      const runs=checkpoint.usage.cost.pandaRunIds??record?.data.runIds;
+      assert.equal(new Set(runs).size,mode==="paid-compaction"?2:1);
+      assert.equal(checkpoint.usage.cost.total,runs.length*.03);
     } else if (mode.startsWith("refused-")) {
       const leaf=manager.getLeafId();
       await assert.rejects(mode==="refused-manual" ? session.compact() : session.navigateTree(users[0],{summarize:true}),/Panda declined/);
@@ -127,6 +132,13 @@ if (["summary", "branch", "summary-length", "branch-length"].includes(mode)) {
     session.setActiveToolsByName([]);
     await session.prompt("Continue the same conversation.");
   } finally { session.dispose(); }
+} else if (mode.startsWith("aggregate-")) {
+  const result=await stream(model,{messages:[user]},options).result();
+  assert.equal(result.stopReason,"stop");assert.equal(result.usage.totalTokens,1210);assert.equal(result.usage.cost.total,.03);
+  const aggregate=result.diagnostics?.find(item=>item.type==="panda.aggregate_usage");
+  if (mode==="aggregate-present") assert.equal(aggregate.details.totalTokens,3024);
+  else if (mode==="aggregate-zero") assert.equal(aggregate.details.totalTokens,0);
+  else assert.equal(aggregate,undefined);
 } else if (["usage", "timeout", "malformed", "stream-error", "settled-cut", "content-filter",
     "support-cut", "settled-abort", "settled-callback", "large-receipt"].includes(mode)) {
   const controller=new AbortController(); let responseHeaders;

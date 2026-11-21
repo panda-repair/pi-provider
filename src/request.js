@@ -107,7 +107,7 @@ export function pandaStream(stream, assertAvailable, { observe, accounting, canD
         if (Object.keys(details).length) failure = { ...failure, details };
         const message = errorMessage(model, failure, aborted);
         if (state.finish === "content_filter") message.rawStopReason = "content_filter";
-        return accounting?.apply(message, settled, state.key, details.requestId) ?? message;
+        return accounting?.apply(message, settled, options) ?? message;
       }
       let message = original;
       // Pi's agent invokes these three callbacks on foreground turns. Its native
@@ -119,7 +119,7 @@ export function pandaStream(stream, assertAvailable, { observe, accounting, canD
         ] };
       }
       const result = usage.finish(message);
-      return accounting?.apply(result, state.settled, state.key, state.supportId, options.signal) ?? result;
+      return accounting?.apply(result, state.settled, options) ?? result;
     }
 
     const callback = fn => fn && (async (...args) => {

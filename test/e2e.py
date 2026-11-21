@@ -313,9 +313,13 @@ def main():
     modes += ["virtual", "standalone", "large-failed-turn", "settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"]
     modes += ["refused-manual", "refused-branch", "panel-context", "routed-context", "oversized-context", "support-cut",
               "settled-abort", "settled-callback", "large-receipt", "sdk-picker", "paid-compaction", "paid-branch"]
+    modes += ["saved-standalone", "saved-custom-manual", "saved-custom-branch", "saved-default-decoy", "saved-explicit",
+              "saved-tool", "aggregate-present", "aggregate-zero", "aggregate-missing", "aggregate-null"]
     for mode in modes:
         target = "auto:quality" if mode == "usage" else "panel:panda" if mode == "timeout" else "auto:cost"
         if mode in ("virtual", "large-failed-turn", "panel-context", "oversized-context", "large-receipt"):
+            target = "panel:panda"
+        if mode.startswith(("saved-", "aggregate-")):
             target = "panel:panda"
         if mode == "routed-context":
             target = "auto:quality"
@@ -326,7 +330,12 @@ def main():
         chat, listed, _, _, recorder = capture("native-" + mode, target, fault, native=mode)
         bodies = [r["body"] for r in chat]
         if mode == "sdk-picker":
-            assert not chat and len(listed) == 2, mode
+            assert not chat and len(listed) == 3, mode
+        elif mode.startswith("saved-"):
+            admissions = 3 if mode == "saved-default-decoy" else 2 if mode.startswith("saved-custom") else 1
+            attempts = admissions + (3 if admissions > 1 else 2 if mode == "saved-standalone" else 1)
+            assert len(recorder.runs) == admissions and len(chat) == attempts, mode
+            assert [r["response_status"] for r in chat] == [200] * admissions + [409] * (attempts - admissions), mode
         elif mode in ("oversized-context", "paid-compaction"):
             assert len(chat) == 2 and key(chat[0]) != key(chat[1]), mode
         elif mode in ("summary", "branch"):

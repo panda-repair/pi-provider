@@ -38,7 +38,8 @@ async function stockListConfig() {
 // point Pi supplies no registry to the extension. Bind the runtime explicitly.
 export const withPandaModelRuntime = runtime => pi => pandaExtension(pi, runtime);
 
-export default async function pandaExtension(pi, runtime) {
+export default async function pandaExtension(pi, callerRuntime) {
+  let runtime = callerRuntime;
   const cliConfig = await stockListConfig();
   const accounting = settlementAccounting();
   const provider = createPandaProvider({
@@ -99,27 +100,27 @@ export default async function pandaExtension(pi, runtime) {
     runtime = ctx.modelRegistry.runtime;
     await ctx.modelRegistry.refresh({ providers: ["panda"], allowNetwork: false });
   });
-  pi.on("session_shutdown", () => { accounting.bind(undefined); runtime = undefined; });
+  pi.on("session_shutdown", () => { accounting.bind(undefined); runtime = callerRuntime; });
   pi.on("session_before_compact", (event, ctx) => {
+    accounting.endSplit();
     if (!guardTarget(ctx)) return { cancel: true };
     if (event.reason !== "manual") {
       const last = event.branchEntries.findLast(entry => entry.type === "message")?.message;
       if (last?.provider === "panda" && (last.stopReason === "error" ||
           (event.willRetry && last.stopReason === "length"))) return { cancel: true };
     }
-    accounting.beginCheckpoint("compaction", event.signal);
+    if (event.preparation.isSplitTurn && event.preparation.messagesToSummarize.length && event.preparation.turnPrefixMessages.length) {
+      accounting.beginSplit(event.signal);
+    }
   });
-  pi.on("session_compact_failed", () => accounting.endCheckpoint("compaction"));
+  pi.on("before_provider_headers", event => accounting.agentHeaders(event.headers));
+  pi.on("session_compact_failed", () => accounting.endSplit());
   pi.on("session_compact", (event, ctx) => {
     const entry = !event.fromExtension && ctx.sessionManager.getEntries().findLast(row => row.type === "compaction");
-    accounting.endCheckpoint("compaction", entry, pi.appendEntry);
+    accounting.endSplit(entry, pi.appendEntry);
   });
   pi.on("session_before_tree", (event, ctx) => {
     if (event.preparation.userWantsSummary && !guardTarget(ctx)) return { cancel: true };
-    if (event.preparation.userWantsSummary) accounting.beginCheckpoint("branch_summary", event.signal);
-  });
-  pi.on("session_tree", event => {
-    accounting.endCheckpoint("branch_summary", !event.fromExtension && event.summaryEntry, pi.appendEntry);
   });
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!guardTarget(ctx)) { ctx.abort(); return; }

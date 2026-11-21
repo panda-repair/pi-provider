@@ -96,13 +96,19 @@ test("paid, zero, unknown and ordinary errors stop as soon as the first result a
   }
 });
 
-test("valid failed settlement is counted once, and a saved session recognizes its replay after restart", async () => {
+test("only a saved positive receipt suppresses a later contribution to session spending", async () => {
   const original=receipt("failed","3"); const paid=()=>refusal(502,"answer_invalid",original);
   const replay=()=>refusal(409,"mixture_already_failed",{...original,replay:true});
-  const h=harness([paid,replay]);const first=await h.send();const dupe=await h.send();
-  assert.equal(first.usage.cost.total,.03);assert.equal(dupe.usage.cost.total,0);
+  const account=settlementAccounting(), rows=[];
+  account.bind({getEntries:()=>rows});
+  const h=harness([paid,replay,paid],{accounting:account});
+  const standalone=await h.send(), firstSaved=await h.send();
+  assert.equal(standalone.usage.cost.total,.03);assert.equal(firstSaved.usage.cost.total,.03);
+  rows.push({type:"message",message:structuredClone(firstSaved)});
+  const dupe=await h.send(); // The service did not mark this copy as a replay.
+  assert.equal(dupe.usage.cost.total,0);
   assert.equal(dupe.diagnostics[0].details.panda.charge.minor_units,"3");
-  const fresh=settlementAccounting();fresh.bind({getEntries:()=>[{type:"message",message:first}]});
+  const fresh=settlementAccounting();fresh.bind({getEntries:()=>rows});
   assert.equal((await harness([replay],{accounting:fresh}).send()).usage.cost.total,0);
   assert.equal((await harness([replay]).send()).usage.cost.total,.03);
 });
@@ -209,19 +215,39 @@ test("valid Panel receipts at the public byte limit retain their settlement and 
   void fixture.body.cancel();
 });
 
-test("bound history distinguishes first-seen and counted receipts after cache eviction and restart", () => {
-  const kept=[], account=settlementAccounting();
-  account.bind({getEntries:()=>kept});
-  const paid=(n,replay=false)=>({...receipt("failed","3"),replay,run_id:n.toString(16).padStart(32,"0")});
-  const apply=(who,n,replay)=>who.apply({...initial,provider:"panda"},paid(n,replay),"key");
-  for(let n=0;n<=1024;n++) kept.push({type:"message",message:apply(account,n,false)});
-  assert.equal(apply(account,0,true).usage.cost.total,0);
-  const first=apply(account,1025,true);
-  assert.equal(first.usage.cost.total,.03); kept.push({type:"message",message:first});
-  assert.equal(apply(account,1025,true).usage.cost.total,0);
-  const restarted=settlementAccounting(); restarted.bind({getEntries:()=>kept});
-  assert.equal(apply(restarted,1025,true).usage.cost.total,0);
-  assert.equal(apply(restarted,1026,true).usage.cost.total,.03);
+test("every Pi spending-entry type carries Panda provenance through copies and restart", () => {
+  const account=settlementAccounting(), rows=[];
+  const id=n=>n.toString(16).padStart(32,"0");
+  const apply=(n,replay)=>account.apply({...initial,provider:"panda"},{...receipt("failed","3"),run_id:id(n),replay});
+  const bind=()=>account.bind({getEntries:()=>structuredClone(rows)});
+  const usage=n=>JSON.parse(JSON.stringify(apply(n,false).usage));
+  bind();
+  const a=usage(1), b=usage(2);
+  rows.push({type:"compaction",fromHook:true,usage:{...a,cost:{...a.cost}}},
+    {type:"branch_summary",fromHook:true,usage:b},{type:"usage",usage:usage(3)},
+    {type:"message",message:{role:"toolResult",usage:usage(4)}},
+    {type:"message",message:{role:"assistant",provider:"other",usage:usage(5)}});
+  for (let n=10;n<1035;n++) rows.push({type:"usage",usage:usage(n)});
+  bind();
+  for (const n of [1,2,3,4,5,10,1034]) assert.equal(apply(n,true).usage.cost.total,0);
+  const duplicateCost=apply(1,true).usage.cost;
+  const free=account.apply(initial,{...receipt("completed","0"),run_id:id(7)});
+  assert.equal(duplicateCost.pandaRunIds,undefined);
+  assert.equal(free.usage.cost.pandaRunIds,undefined);
+  rows.push({type:"usage",usage:{cost:{...free.usage.cost,total:.05}}});
+  assert.equal(apply(7,true).usage.cost.total,.03);
+  const newReceipt=apply(1035,true); assert.equal(newReceipt.usage.cost.total,.03);
+  rows.push({type:"usage",usage:newReceipt.usage}); assert.equal(apply(1035,false).usage.cost.total,0);
+  // A numeric-only foreign result, free legacy row, or detached marker never established this charge.
+  rows.push({type:"compaction",id:"foreign",fromHook:true,usage:{cost:{total:.03}}},
+    {type:"usage",usage:{cost:{total:.03,pandaRunIds:id(8)+"x"}}},
+    {type:"usage",usage:{cost:{total:.03,pandaRunIds:{}}}},
+    {type:"message",message:{...apply(8,true),usage:{cost:{total:0}},diagnostics:[
+      {type:"panda.settlement",details:{runId:id(8),counted:false}}]}},
+    {type:"custom",customType:"panda.checkpoint_receipts",data:{runIds:[id(8)],checkpointId:"missing"}},
+    {type:"custom",customType:"panda.checkpoint_receipts",data:{runIds:[id(8)],checkpointId:"foreign"}});
+  assert.equal(apply(8,true).usage.cost.total,.03);
+  for(let i=0;i<2;i++) assert.equal(account.apply(initial,{...receipt("failed","3"),run_id:undefined,replay:true}).usage.cost.total,.03);
 });
 
 test("the active deadline permits slow receipts and bounds an incomplete error stream", async () => {
@@ -242,27 +268,24 @@ test("the active deadline permits slow receipts and bounds an incomplete error s
   assert.ok(Date.now()-started<1500);
 });
 
-test("only paid persisted checkpoints mark their own run IDs across reopen", () => {
+test("a native split records its paid Panda legs, including when another leg supplies other usage", () => {
   const account=settlementAccounting(), rows=[];
-  const manager={getEntries:()=>rows};
+  account.bind({getEntries:()=>rows});
   const append=(type,data)=>rows.push({type:"custom",customType:type,data});
-  const op=new AbortController(), other=new AbortController();
-  const pay=(who,n,signal,replay=false)=>who.apply({...initial,provider:"panda"},
-    {...receipt("completed","3"),run_id:n.toString(16).padStart(32,"0"),replay},"key",undefined,signal);
-  account.bind(manager);
-  account.beginCheckpoint("compaction",op.signal);
-  [1,2].forEach(i=>pay(account,i,op.signal));
-  pay(account,3,other.signal);
-  const entry={type:"compaction",id:"saved",usage:{cost:{total:.06}}};
-  account.endCheckpoint("compaction",entry,append);
-  account.endCheckpoint("compaction",entry,append);
-  account.beginCheckpoint("branch_summary",other.signal);
-  pay(account,4,other.signal);
-  account.endCheckpoint("branch_summary");
-  assert.equal(rows.length,1);assert.equal(rows[0].data.runIds.length,2);
-  const fresh=settlementAccounting();fresh.bind(manager);
-  [1,2].forEach(i=>assert.equal(pay(fresh,i,undefined,true).usage.cost.total,0));
-  [3,4,5].forEach(i=>assert.equal(pay(fresh,i,undefined,true).usage.cost.total,.03));
+  const op=new AbortController(), agentHeaders={};
+  const id=n=>n.toString(16).padStart(32,"0");
+  const pay=(n,headers,cents="3")=>account.apply(initial,{...receipt("completed",cents),run_id:id(n)},{signal:op.signal,headers});
+  account.beginSplit(op.signal);
+  pay(8,{}); // An incidental custom extension reused the operation signal.
+  account.agentHeaders(agentHeaders);
+  pay(1,agentHeaders);
+  pay(2,agentHeaders,"0");
+  const entry={type:"compaction",id:"saved",usage:{cost:{total:.07}}}; // Includes another provider's cost.
+  rows.push(entry);account.endSplit(entry,append);account.endSplit(entry,append);
+  assert.deepEqual(rows[1].data,{checkpointId:"saved",runIds:[id(1)]});
+  assert.equal(pay(1,{}).usage.cost.total,0);assert.equal(pay(8,{}).usage.cost.total,.03);
+  account.beginSplit(op.signal);account.agentHeaders(agentHeaders);pay(9,agentHeaders);
+  account.endSplit();assert.equal(pay(9,{}).usage.cost.total,.03);
 });
 
 test("the byte bound includes the whole UTF-8 SSE and allows large validated error events", async () => {

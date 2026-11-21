@@ -45,6 +45,12 @@ class Recorder:
         with self.lock:
             self.chat_count += 1
             request = {k: v for k, v in body.items() if k not in ("seed", "user")}
+            if scenario and scenario.startswith("saved-"):
+                # Deliver a previous receipt on demand without admitting another fixture run.
+                last = body.get("messages", [{}])[-1].get("content")
+                for previous in self.runs.values():
+                    if "FIXTURE_RECEIPT_" + previous["id"] in str(last):
+                        return "replay", dict(previous)
             if key is not None and key in self.runs:
                 run = self.runs[key]
                 return ("replay" if run["request"] == request else "conflict"), dict(run)
@@ -287,10 +293,20 @@ class Handler(BaseHTTPRequestHandler):
                     choices = [{"index": 0, "delta": d, "finish_reason": end} for d, end in
                                [({"role": "assistant"}, None), (delta, None), ({}, reason)]]
                     chunks = [dict(base, choices=[c]) for c in choices]
-                    if mode in ("paid-compaction", "paid-branch"):
+                    if mode in ("paid-compaction", "paid-branch") or (mode or "").startswith("saved-"):
                         state.recorder.settle(admitted, "completed")
                         admitted["cents"] = 3
                         chunks[-1]["panda"] = dict(self.settlement(admitted), mode="single")
+                    aggregate_test = (mode or "").startswith("aggregate-")
+                    if aggregate_test:
+                        state.recorder.settle(admitted, "completed")
+                        admitted["cents"] = 3
+                        chunks[-1]["panda"] = dict(self.settlement(admitted), mode="panel",
+                            agents=[{"usage": {"input_tokens": 1200, "output_tokens": 4}}],
+                            synthesis={"usage": {"input_tokens": 1800, "output_tokens": 10}})
+                        counts = (0, 0) if mode == "aggregate-zero" else (3000, 24)
+                        usage = None if mode == "aggregate-null" else dict(prompt_tokens=counts[0],
+                            completion_tokens=counts[1], total_tokens=sum(counts))
                     if mode in ("settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"):
                         state.recorder.settle(admitted, "completed")
                         admitted["cents"] = 0 if mode == "content-filter" else 3
@@ -318,7 +334,7 @@ class Handler(BaseHTTPRequestHandler):
                         admitted["cents"] = 13
                         chunks[-1]["panda"] = dict(self.settlement(admitted), mode="panel",
                             agents=[call(prompt), call(75000)], synthesis=call(160000))
-                    if (body.get("stream_options") or {}).get("include_usage"):
+                    if (body.get("stream_options") or {}).get("include_usage") and mode != "aggregate-missing":
                         chunks.append(dict(base, choices=[], usage=usage))
                     payload = ("".join("data: " + compact(chunk) + "\n\n" for chunk in chunks) +
                                "data: [DONE]\n\n").encode("utf-8")

@@ -15,6 +15,7 @@ test("direct and routed Panels expose one conversation to all Pi token checks an
     const usage=responseUsage({id});
     usage.request('{"messages":[]}');
     usage.chunk({panda:{version:"panda.chat.v1",status:"completed",mode:"panel",agents:[count(75000,15),count(74000,15)],synthesis:count(160000,15),charge}});
+    usage.chunk({choices:[],usage:{prompt_tokens:225000,completion_tokens:45,total_tokens:225045}});
     const message=usage.finish(base), out=message.usage;
     assert.deepEqual([out.input,out.cacheRead,out.cacheWrite,out.output,out.totalTokens],[74900,100,0,15,75015]);
     assert.deepEqual(message.diagnostics[0].details,{input:220000,output:45,cacheRead:5000,cacheWrite:0,totalTokens:225045});
@@ -36,6 +37,20 @@ test("direct and routed Panels expose one conversation to all Pi token checks an
   const actual=large.finish(base).usage;
   assert.equal(actual.input+actual.cacheRead,250000);
   assert.equal(actual.totalTokens,250015);
+});
+
+test("only reported Panel aggregate counters produce spending diagnostics, including a genuine zero trailer", () => {
+  const meta={version:"panda.chat.v1",status:"completed",mode:"panel",agents:[count(1200,5)],synthesis:count(1600,10),charge};
+  for (const counts of [undefined,null,{}, {prompt_tokens:0,completion_tokens:0,total_tokens:0}]) {
+    const incoming=responseUsage({id:"auto"});
+    incoming.chunk({choices:[{finish_reason:"stop"}],panda:meta});
+    if (counts!==undefined) incoming.chunk({choices:[],usage:counts});
+    const result=incoming.finish({...base,usage:{input:0,cacheRead:0,cacheWrite:0,output:0,totalTokens:0,cost:{total:0}}});
+    assert.equal(result.usage.totalTokens,1210);assert.equal(result.usage.cost.total,.13);
+    const aggregate=result.diagnostics?.find(item=>item.type==="panda.aggregate_usage")?.details;
+    if (counts?.total_tokens===0) assert.deepEqual(aggregate,{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0});
+    else assert.equal(aggregate,undefined);
+  }
 });
 
 test("Panel transport honors explicit short and long timeouts and a ten-minute standalone default", async () => {

@@ -94,8 +94,8 @@ export function pandaEventStream(response, state, canDisplay, signal, usage) {
           state.settled = settlement(undefined, chunk.panda);
           if (state.settled?.status === "running") state.settled = undefined;
         }
+        usage.chunk(chunk);
         if (chunk.panda) {
-          usage.chunk(chunk);
           // Panel member answers belong to Panda. Forward only the validated public receipt.
           chunk.panda = settlement(undefined, chunk.panda);
         }
