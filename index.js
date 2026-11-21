@@ -107,9 +107,19 @@ export default async function pandaExtension(pi, runtime) {
       if (last?.provider === "panda" && (last.stopReason === "error" ||
           (event.willRetry && last.stopReason === "length"))) return { cancel: true };
     }
+    accounting.beginCheckpoint("compaction", event.signal);
+  });
+  pi.on("session_compact_failed", () => accounting.endCheckpoint("compaction"));
+  pi.on("session_compact", (event, ctx) => {
+    const entry = !event.fromExtension && ctx.sessionManager.getEntries().findLast(row => row.type === "compaction");
+    accounting.endCheckpoint("compaction", entry, pi.appendEntry);
   });
   pi.on("session_before_tree", (event, ctx) => {
     if (event.preparation.userWantsSummary && !guardTarget(ctx)) return { cancel: true };
+    if (event.preparation.userWantsSummary) accounting.beginCheckpoint("branch_summary", event.signal);
+  });
+  pi.on("session_tree", event => {
+    accounting.endCheckpoint("branch_summary", !event.fromExtension && event.summaryEntry, pi.appendEntry);
   });
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!guardTarget(ctx)) { ctx.abort(); return; }

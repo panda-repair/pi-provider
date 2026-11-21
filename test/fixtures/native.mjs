@@ -34,6 +34,47 @@ if (["summary", "branch", "summary-length", "branch-length"].includes(mode)) {
     const next = await summarize();
     assert.match(next.text ?? next.summary, /Read a scratch fixture/);
   }
+} else if (["refused-manual","refused-branch","panel-context","routed-context","oversized-context","paid-compaction","paid-branch"].includes(mode)) {
+  const paid=mode.startsWith("paid-");
+  services.settingsManager.applyOverrides({compaction:{enabled:true,reserveTokens:16384,keepRecentTokens:paid?1:16}});
+  const saved=join(process.cwd(),mode);
+  const manager=paid?pi.SessionManager.create(process.cwd(),saved):pi.SessionManager.inMemory(process.cwd());
+  const users=[];
+  for(let i=0;i<6;i++) {
+    users.push(manager.appendMessage({...user,content:"Earlier request ".repeat(32)+i,timestamp:i}));
+    if (paid) manager.appendMessage({role:"assistant",provider:"panda",api:model.api,model:model.id,timestamp:i,
+      stopReason:"stop",content:[{type:"text",text:"Earlier answer ".repeat(24)}],
+      usage:{input:10,output:10,cacheRead:0,cacheWrite:0,totalTokens:20,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}});
+  }
+  const {session}=await pi.createAgentSessionFromServices({services,model,sessionManager:manager,noTools:"all"});
+  try {
+    await session.bindExtensions({mode:"print"});
+    const checkpoints=()=>manager.getEntries().filter(entry=>["compaction","branch_summary"].includes(entry.type));
+    if (paid) {
+      if (mode==="paid-compaction") await session.compact();
+      else await session.navigateTree(users[0],{summarize:true});
+      const entries=pi.SessionManager.open(manager.getSessionFile(),saved,process.cwd()).getEntries();
+      const record=entries.find(e=>e.type==="custom"&&e.customType==="panda.checkpoint_receipts");
+      const checkpoint=entries.find(e=>e.id===record?.data.checkpointId);
+      assert.equal(checkpoint?.type,mode==="paid-compaction"?"compaction":"branch_summary");
+      assert.equal(new Set(record.data.runIds).size,mode==="paid-compaction"?2:1);
+      assert.equal(checkpoint.usage.cost.total,record.data.runIds.length*.03);
+    } else if (mode.startsWith("refused-")) {
+      const leaf=manager.getLeafId();
+      await assert.rejects(mode==="refused-manual" ? session.compact() : session.navigateTree(users[0],{summarize:true}),/Panda declined/);
+      assert.equal(manager.getLeafId(),leaf);
+      assert.equal(manager.buildSessionProjection().messages.filter(m=>m.role==="user").length,6);
+      assert.equal(checkpoints().length,0);
+    } else {
+      await session.prompt("Answer the next request."); await session.waitForIdle();
+      const message=manager.getEntries().find(entry=>entry.type==="message" && entry.message.role==="assistant").message;
+      const large=mode==="oversized-context";
+      assert.equal(message.usage.input+message.usage.cacheRead,large?250000:75000);
+      assert.equal(message.usage.totalTokens,large?250015:75015);
+      assert.equal(message.diagnostics.find(d=>d.type==="panda.aggregate_usage").details.totalTokens,310045);
+      assert.equal(message.usage.cost.total,.13); assert.equal(checkpoints().length,large?1:0);
+    }
+  } finally {session.dispose();}
 } else if (mode === "standalone") {
   const { session } = await pi.createAgentSessionFromServices({
     services, model, sessionManager: pi.SessionManager.inMemory(process.cwd()), tools: [],
@@ -86,9 +127,18 @@ if (["summary", "branch", "summary-length", "branch-length"].includes(mode)) {
     session.setActiveToolsByName([]);
     await session.prompt("Continue the same conversation.");
   } finally { session.dispose(); }
-} else if (["usage", "timeout", "malformed", "stream-error", "settled-cut", "content-filter"].includes(mode)) {
+} else if (["usage", "timeout", "malformed", "stream-error", "settled-cut", "content-filter",
+    "support-cut", "settled-abort", "settled-callback", "large-receipt"].includes(mode)) {
+  const controller=new AbortController(); let responseHeaders;
   const source = stream(model, { messages: [user] }, {
-    ...options, timeoutMs: mode === "timeout" ? 15_000 : undefined,
+    ...options, signal:AbortSignal.any([signal,controller.signal]), timeoutMs: mode === "timeout" ? 15_000 : undefined,
+    onResponse(response) {responseHeaders=response.headers;},
+    onProviderStreamEvent(chunk) {
+      if (chunk.choices?.[0]?.finish_reason) {
+        if (mode==="settled-abort") controller.abort();
+        if (mode==="settled-callback") throw new Error("private-marker-callback");
+      }
+    },
   });
   const retained = [];
   for await (const event of source) retained.push(event);
@@ -96,15 +146,26 @@ if (["summary", "branch", "summary-length", "branch-length"].includes(mode)) {
   assert.doesNotMatch(JSON.stringify(retained), /private-marker/);
   if (mode === "usage") {
     const { input, output, cacheRead, cacheWrite, totalTokens, cost } = message.usage;
-    assert.equal(input + output + cacheRead + cacheWrite, 310045);
+    assert.equal(input + output + cacheRead + cacheWrite, 75015);
+    assert.equal(cacheRead,1200);
+    assert.equal(message.diagnostics.find(d=>d.type==="panda.aggregate_usage").details.totalTokens,310045);
     assert.equal(totalTokens, 75015);
     assert.equal(cost.total, 0.13);
   } else if (mode === "settled-cut") {
     assert.equal(message.stopReason,"stop"); assert.match(JSON.stringify(message.content),/paid partial answer/);
     assert.equal(message.usage.cost.total,.03);
   } else if (mode === "content-filter") {
-    assert.equal(message.stopReason,"stop"); assert.equal(message.rawStopReason,"content_filter");
-    assert.match(JSON.stringify(message.content),/declined/); assert.equal(message.usage.cost.total,0);
+    assert.equal(message.stopReason,"error"); assert.equal(message.rawStopReason,"content_filter");
+    assert.match(message.errorMessage,/declined/); assert.equal(message.usage.cost.total,0);
+  } else if (mode==="support-cut") {
+    assert.equal(responseHeaders["x-panda-request-id"],"fixture.502.trace");
+    assert.deepEqual(Object.keys(responseHeaders).sort(),["content-type","x-panda-request-id"]);
+    assert.equal(message.stopReason,"error");assert.equal(message.diagnostics[0].details.requestId,"fixture.502.trace");
+  } else if (mode==="settled-callback" || mode==="settled-abort") {
+    assert.equal(message.stopReason,mode==="settled-abort"?"aborted":"error");assert.equal(message.usage.cost.total,.03);
+  } else if (mode==="large-receipt") {
+    assert.equal(message.stopReason,"error");assert.equal(message.usage.cost.total,.03);
+    assert.equal(message.diagnostics[0].details.code,"answer_invalid");
   } else if (mode === "timeout") {
     assert.equal(message.stopReason, "stop");
   } else {

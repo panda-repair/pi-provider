@@ -1,73 +1,123 @@
-import { describeError, settlement, unknownOutcome } from "./errors.js";
+import { describeError, maxAnswerBytes, settlement, supportId, unknownOutcome } from "./errors.js";
 
-const maxFrame = 1_048_576;
 const encoder = new TextEncoder();
 const finishReasons = new Set(["stop", "length", "tool_calls", "function_call", "content_filter"]);
+class InvalidStream extends Error {}
 
-async function* frames(body) {
+async function* lines(body, signal) {
+  const reader = body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
-  let pending = "", data = [], event = "", size = 0;
-  // Panda emits standard SSE data frames. Support split UTF-8, CRLF and multiline data.
-  for await (const bytes of body) {
-    pending += decoder.decode(bytes, { stream: true });
-    let start = 0;
-    for (let i = 0; i < pending.length; i++) {
-      if (pending[i] !== "\n" && pending[i] !== "\r") continue;
-      if (pending[i] === "\r" && i === pending.length - 1) break;
-      const line = pending.slice(start, i);
-      if (pending[i] === "\r" && pending[i + 1] === "\n") i++;
-      start = i + 1;
-      size += line.length;
-      if (size > maxFrame) throw new Error();
-      if (!line) {
-        if (data.length || event === "error") yield { data: data.join("\n"), event };
-        data = []; event = ""; size = 0;
-      } else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
-      else if (line.startsWith("event:")) event = line.slice(6).trim();
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  signal?.addEventListener("abort", cancel, { once: true });
+  let fragments = [], size = 0, afterCR = false;
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      const { done, value } = await reader.read();
+      signal?.throwIfAborted();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxAnswerBytes) throw new InvalidStream();
+      let text;
+      try { text = decoder.decode(value, { stream: true }); } catch { throw new InvalidStream(); }
+      if (!text) continue;
+      let start = afterCR && text[0] === "\n" ? 1 : 0;
+      afterCR = false;
+      for (let i = start; i < text.length; i++) {
+        if (text[i] !== "\n" && text[i] !== "\r") continue;
+        fragments.push(text.slice(start, i));
+        yield fragments.join("");
+        fragments = [];
+        if (text[i] === "\r") {
+          if (i + 1 === text.length) afterCR = true;
+          else if (text[i + 1] === "\n") i++;
+        }
+        start = i + 1;
+      }
+      if (start < text.length) fragments.push(text.slice(start));
     }
-    pending = pending.slice(start);
-    if (size + pending.length > maxFrame) throw new Error();
+    decoder.decode();
+    if (fragments.length) throw new Error();
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    cancel();
+    reader.releaseLock();
   }
-  decoder.decode();
-  if (pending.trim() || data.length) throw new Error();
 }
 
-export function pandaEventStream(response, state, canDisplay) {
+async function* frames(body, signal) {
+  let data = [], event = "";
+  for await (const line of lines(body, signal)) {
+    if (!line) {
+      if (data.length || event === "error") yield { data: data.join("\n"), event };
+      data = []; event = "";
+    } else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+    else if (line.startsWith("event:")) event = line.slice(6).trim();
+  }
+  if (data.length) throw new Error();
+}
+
+export function pandaEventStream(response, state, canDisplay, signal, usage) {
+  const id = supportId(response.headers);
+  if (id) state.supportId = id;
+  const consumer = new AbortController();
+  const reading = AbortSignal.any([signal, consumer.signal]);
+  state.cancelBody = () => {
+    consumer.abort();
+    if (!response.body.locked) void response.body.cancel().catch(() => {});
+  };
   async function* read() {
     let done = false;
     try {
-      for await (const frame of frames(response.body)) {
+      if (Number(response.headers.get("content-length")) > maxAnswerBytes) {
+        void response.body.cancel().catch(() => {});
+        throw new InvalidStream();
+      }
+      for await (const frame of frames(response.body, reading)) {
         if (frame.data === "[DONE]" && frame.event !== "error") {
           if (!state.finish) throw new Error();
           done = true;
           break;
         }
-        const chunk = JSON.parse(frame.data);
+        let chunk;
+        try { chunk = JSON.parse(frame.data); } catch { throw new InvalidStream(); }
         const error = chunk?.error ?? chunk?.choices?.[0]?.error ?? chunk?.choices?.[0]?.delta?.error;
         if (frame.event === "error" || error != null) {
-          if (!state.settled) state.failure = describeError(200, { error: error ?? chunk, panda: chunk?.panda }, response.headers, canDisplay);
+          state.failure = describeError(200, { error: error ?? chunk, panda: chunk?.panda }, response.headers, canDisplay);
           break;
         }
-        if (!Array.isArray(chunk?.choices)) throw new Error();
-        const choice = chunk.choices[0];
-        const reason = choice?.finish_reason;
+        if (!Array.isArray(chunk?.choices)) throw new InvalidStream();
+        const reason = chunk.choices[0]?.finish_reason;
         if (reason) {
-          if (!finishReasons.has(reason)) throw new Error();
+          if (!finishReasons.has(reason)) throw new InvalidStream();
           state.finish = reason;
           state.settled = settlement(undefined, chunk.panda);
           if (state.settled?.status === "running") state.settled = undefined;
-          if (reason === "content_filter") choice.finish_reason = "stop";
         }
-        // The original OpenAI adapter still parses all normal text, tools and usage.
+        if (chunk.panda) {
+          usage.chunk(chunk);
+          // Panel member answers belong to Panda. Forward only the validated public receipt.
+          chunk.panda = settlement(undefined, chunk.panda);
+        }
         yield encoder.encode("data: " + JSON.stringify(chunk) + "\n\n");
       }
       if ((!state.finish || (!done && !state.settled)) && !state.failure) throw new Error();
-    } catch {
-      if (!state.settled) state.failure ??= { message: unknownOutcome };
+    } catch (error) {
+      // Only losing the optional trailer after a validated finish can end successfully.
+      if (error instanceof InvalidStream && state.settled) state.failure ??= { message: "Panda returned a settlement followed by an invalid stream." };
+      else if (!state.settled) state.failure ??= { message: unknownOutcome };
     }
     yield encoder.encode("data: [DONE]\n\n");
   }
-  return new Response(ReadableStream.from(read()), {
-    status: response.status, headers: { "content-type": "text/event-stream" },
-  });
+  const framesToSend = read();
+  const body = new ReadableStream({
+    async pull(controller) {
+      const next = await framesToSend.next();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+    cancel() { state.cancelBody(); return framesToSend.return(); },
+  }, { highWaterMark: 0 });
+  return new Response(body, { status: response.status,
+    headers: { "content-type": "text/event-stream", ...(id && { "x-panda-request-id": id }) } });
 }

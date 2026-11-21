@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import backendGrants from "../src/routing-backend-grants.json" with { type: "json" };
-import { describeError, retryWait } from "../src/errors.js";
+import { boundedJSON, describeError, maxAnswerBytes, retryWait } from "../src/errors.js";
 import { pandaStream } from "../src/request.js";
 import { settlementAccounting } from "../src/usage.js";
 
@@ -62,7 +62,10 @@ test("backoff observes delay, cancellation, total deadline and validated Retry-A
   const short=harness([allowed]); assert.equal((await short.send({timeoutMs:30})).stopReason,"error"); assert.equal(short.calls.length,1);
   const aborted=harness([allowed]); const controller=new AbortController();
   const job=aborted.send({signal:controller.signal}); setTimeout(()=>controller.abort(),10);
-  assert.equal((await job).stopReason,"error"); assert.equal(aborted.calls.length,1);
+  const cancellation=await job;
+  assert.equal(cancellation.stopReason,"aborted"); assert.equal(aborted.calls.length,1);
+  assert.match(cancellation.errorMessage,/did not admit.*No charge/);
+  assert.doesNotMatch(cancellation.errorMessage,/may have run/);
   const now=Date.parse("Tue, 01 Dec 2026 10:00:00 GMT");
   assert.equal(retryWait("Tue, 01 Dec 2026 10:00:01 GMT",0,now),1000);
   assert.equal(retryWait("0",0),0); assert.equal(retryWait(null,1),500);
@@ -107,7 +110,7 @@ test("valid failed settlement is counted once, and a saved session recognizes it
 test("only safe error codes, field paths, settlement, and identifiers cross to Pi", () => {
   const result=describeError(502,{error:{code:"answer_invalid",param:"tools[1].function.parameters."+privateText,message:privateText},
     panda:{...receipt("failed","3"),agents:[privateText]},metadata:privateText},
-    new Headers({"x-panda-request-id":privateText,"unrelated":privateText}));
+    new Headers({"x-panda-request-id":"private "+privateText,"unrelated":privateText}));
   assert.equal(result.details.param,"tools[1].function.parameters");
   assert.equal(result.details.requestId,"req_"+"2".repeat(32));
   assert.doesNotMatch(JSON.stringify(result),/DO_NOT_RECORD/);
@@ -161,4 +164,114 @@ test("the inner SDK can only read locally constructed error JSON and selected re
   assert.equal(json.error.code,"answer_invalid");assert.equal(json.error.param,"messages");
   assert.equal(json.panda.charge.minor_units,"3");assert.equal(json.request_id,runId);
   assert.equal(headers.get("x-should-retry"),"false");assert.doesNotMatch(JSON.stringify([json,[...headers]]),/DO_NOT_RECORD/);
+});
+
+test("a caller can reduce pre-admission retries and a later in-flight loss has an unknown outcome", async () => {
+  const hold=()=>refusal(429,"throttle_workspace_rate_limited",undefined,{"retry-after":"0"});
+  for (const limit of [0,1,2,9]) {
+    const budget=Math.min(2,limit), h=harness(Array.from({length:budget+1},()=>hold));
+    const result=await h.send({maxRetries:limit});
+    assert.equal(h.calls.length,budget+1); assert.equal(new Set(h.calls.map(call=>call.key)).size,1);
+    assert.match(result.errorMessage,/No charge was incurred/);
+  }
+  const never=harness([]);
+  const cancelled=await never.send({signal:AbortSignal.abort()});
+  assert.equal(cancelled.stopReason,"aborted"); assert.equal(never.calls.length,0);
+  assert.match(cancelled.errorMessage,/did not send.*No charge/);
+  const lost=harness([hold,()=>{throw new Error(privateText);}]);
+  assert.match((await lost.send({maxRetries:1})).errorMessage,/may have run and been charged/);
+  assert.equal(lost.calls.length,2);
+});
+
+test("valid Panel receipts at the public byte limit retain their settlement and expose no member text", async () => {
+  const raw={error:{code:"answer_invalid",message:privateText},
+    panda:{...receipt("failed","3"),agents:[{response:privateText+"🟢"}]}};
+  const start=JSON.stringify(raw);
+  const exact=start+" ".repeat(maxAnswerBytes-Buffer.byteLength(start));
+  const reply=(text,length)=>new Response(new ReadableStream({
+    async start(controller) {
+      const bytes=Buffer.from(text); controller.enqueue(bytes.subarray(0,4000));
+      await new Promise(resolve=>setTimeout(resolve,10));
+      controller.enqueue(bytes.subarray(4000)); controller.close();
+    },
+  }),{status:502, headers:length===undefined?{}:{"content-length":String(length)}});
+  for (const [data,length,valid] of [[exact,maxAnswerBytes,true],[exact,undefined,true],[exact+" ",35,false],
+    [exact.slice(0,220),undefined,false]]) {
+    const result=await harness([()=>reply(data,length)]).send();
+    assert.equal(result.usage.cost.total,valid?.03:0);
+    assert.equal(result.diagnostics?.[0]?.details.code,valid?"answer_invalid":undefined);
+    assert.doesNotMatch(JSON.stringify(result),/DO_NOT_RECORD/);
+  }
+  const fixture=new Response(new ReadableStream({start(controller){controller.enqueue(Buffer.from("{"));}}));
+  const before=Date.now();
+  assert.equal(await boundedJSON(fixture,maxAnswerBytes,25),undefined);
+  assert.ok(Date.now()-before<1500);
+  void fixture.body.cancel();
+});
+
+test("bound history distinguishes first-seen and counted receipts after cache eviction and restart", () => {
+  const kept=[], account=settlementAccounting();
+  account.bind({getEntries:()=>kept});
+  const paid=(n,replay=false)=>({...receipt("failed","3"),replay,run_id:n.toString(16).padStart(32,"0")});
+  const apply=(who,n,replay)=>who.apply({...initial,provider:"panda"},paid(n,replay),"key");
+  for(let n=0;n<=1024;n++) kept.push({type:"message",message:apply(account,n,false)});
+  assert.equal(apply(account,0,true).usage.cost.total,0);
+  const first=apply(account,1025,true);
+  assert.equal(first.usage.cost.total,.03); kept.push({type:"message",message:first});
+  assert.equal(apply(account,1025,true).usage.cost.total,0);
+  const restarted=settlementAccounting(); restarted.bind({getEntries:()=>kept});
+  assert.equal(apply(restarted,1025,true).usage.cost.total,0);
+  assert.equal(apply(restarted,1026,true).usage.cost.total,.03);
+});
+
+test("the active deadline permits slow receipts and bounds an incomplete error stream", async () => {
+  const text=Buffer.from(JSON.stringify({error:{code:"answer_invalid",message:privateText},panda:receipt("failed","3")}));
+  const split=()=>new Response(new ReadableStream({
+    async start(controller) {
+      controller.enqueue(text.subarray(0,10));
+      await new Promise(resolve=>setTimeout(resolve,5100));
+      controller.enqueue(text.subarray(10));controller.close();
+    }
+  }),{status:502});
+  const h=harness([split]);
+  const result=await h.send({timeoutMs:10000});
+  assert.equal(result.usage.cost.total,.03);assert.doesNotMatch(JSON.stringify(result),/DO_NOT_RECORD/);
+  const stalled=harness([()=>new Response(new ReadableStream({start(c){c.enqueue(Buffer.from("{"));}}),{status:502})]);
+  const started=Date.now();
+  assert.match((await stalled.send({timeoutMs:30})).errorMessage,/may have run/);
+  assert.ok(Date.now()-started<1500);
+});
+
+test("only paid persisted checkpoints mark their own run IDs across reopen", () => {
+  const account=settlementAccounting(), rows=[];
+  const manager={getEntries:()=>rows};
+  const append=(type,data)=>rows.push({type:"custom",customType:type,data});
+  const op=new AbortController(), other=new AbortController();
+  const pay=(who,n,signal,replay=false)=>who.apply({...initial,provider:"panda"},
+    {...receipt("completed","3"),run_id:n.toString(16).padStart(32,"0"),replay},"key",undefined,signal);
+  account.bind(manager);
+  account.beginCheckpoint("compaction",op.signal);
+  [1,2].forEach(i=>pay(account,i,op.signal));
+  pay(account,3,other.signal);
+  const entry={type:"compaction",id:"saved",usage:{cost:{total:.06}}};
+  account.endCheckpoint("compaction",entry,append);
+  account.endCheckpoint("compaction",entry,append);
+  account.beginCheckpoint("branch_summary",other.signal);
+  pay(account,4,other.signal);
+  account.endCheckpoint("branch_summary");
+  assert.equal(rows.length,1);assert.equal(rows[0].data.runIds.length,2);
+  const fresh=settlementAccounting();fresh.bind(manager);
+  [1,2].forEach(i=>assert.equal(pay(fresh,i,undefined,true).usage.cost.total,0));
+  [3,4,5].forEach(i=>assert.equal(pay(fresh,i,undefined,true).usage.cost.total,.03));
+});
+
+test("the byte bound includes the whole UTF-8 SSE and allows large validated error events", async () => {
+  const data=JSON.stringify({error:{code:"answer_invalid",message:privateText},panda:{...receipt("failed","3"),agents:[privateText+"🟢"]}});
+  const head="event: error\r\ndata: "+data;
+  const frame=head+" ".repeat(maxAnswerBytes-Buffer.byteLength(head)-4)+"\r\n\r\n";
+  for(const [body,valid] of [[frame,true],[frame+" ",false]]) {
+    const result=await harness([()=>sse(body)]).send();
+    assert.equal(result.usage.cost.total,valid?.03:0);
+    assert.doesNotMatch(JSON.stringify(result),/DO_NOT_RECORD/);
+  }
 });

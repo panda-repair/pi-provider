@@ -49,7 +49,7 @@ class Recorder:
                 run = self.runs[key]
                 return ("replay" if run["request"] == request else "conflict"), dict(run)
             faults = {"prehold", "concurrency", "funding", "server_500", "upstream", "interrupted", "definite", "definite_proxy", "drop_running", "drop_completed",
-                      "drop_partial", "cut_200", "unknown", "panel_failed_paid", "panel_failed_unknown", "panel_failed_zero"}
+                      "drop_partial", "cut_200", "unknown", "panel_failed_paid", "panel_failed_large", "panel_failed_unknown", "panel_failed_zero"}
             fault = scenario if self.chat_count == 1 and scenario in faults else None
             if fault in ("prehold", "concurrency", "funding"):
                 return fault, None
@@ -59,7 +59,7 @@ class Recorder:
             if fault and fault.startswith("panel_failed_"):
                 status = "failed"
             cents = None if status == "running" else 0 if status == "failed" else 1
-            if fault in ("panel_failed_paid", "panel_failed_unknown"):
+            if fault in ("panel_failed_paid", "panel_failed_large", "panel_failed_unknown"):
                 cents = 3
             run = {"request": request, "id": "run-" + number, "request_id": "req_" + number,
                    "status": status, "cents": cents}
@@ -175,6 +175,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Content-Length", "4096")
+                self.send_header("X-Panda-Request-ID", "fixture.502.trace")
+                self.send_header("X-Private", "private-marker-header")
                 self.end_headers()
                 self.wfile.write(b": partial event stream\n\n")
                 self.wfile.flush()
@@ -211,6 +213,8 @@ class Handler(BaseHTTPRequestHandler):
         if receipt:
             envelope["panda"] = receipt
             record["receipt"] = receipt
+        if action == "panel_failed_large":
+            envelope["panda"] = dict(receipt, agents=[{"answer": "private-marker-member" * 1800}])
         self.reply(status, "application/json", compact(envelope).encode(), response_headers)
         return True
 
@@ -268,8 +272,10 @@ class Handler(BaseHTTPRequestHandler):
                 base = {"id": "chatcmpl-local-%d" % record["id"], "created": int(time.time()), "model": body.get("model", "")}
                 usage = {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
                 mode = getattr(state, "scenario", None)
-                if mode == "usage":
-                    usage = {"prompt_tokens": 310000, "completion_tokens": 45, "total_tokens": 310045}
+                panel_usage = mode in ("usage", "panel-context", "routed-context", "oversized-context") and state.recorder.chat_count == 1
+                if panel_usage:
+                    usage = {"prompt_tokens": 310000, "completion_tokens": 45, "total_tokens": 310045,
+                             "prompt_tokens_details": {"cached_tokens": 9000}}
                 if body.get("stream"):
                     content_type = "text/event-stream"
                     base["object"] = "chat.completion.chunk"
@@ -281,6 +287,10 @@ class Handler(BaseHTTPRequestHandler):
                     choices = [{"index": 0, "delta": d, "finish_reason": end} for d, end in
                                [({"role": "assistant"}, None), (delta, None), ({}, reason)]]
                     chunks = [dict(base, choices=[c]) for c in choices]
+                    if mode in ("paid-compaction", "paid-branch"):
+                        state.recorder.settle(admitted, "completed")
+                        admitted["cents"] = 3
+                        chunks[-1]["panda"] = dict(self.settlement(admitted), mode="single")
                     if mode in ("settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"):
                         state.recorder.settle(admitted, "completed")
                         admitted["cents"] = 0 if mode == "content-filter" else 3
@@ -300,12 +310,14 @@ class Handler(BaseHTTPRequestHandler):
                             self.close_connection = True
                             self.connection.shutdown(socket.SHUT_RDWR)
                             return
-                    if mode == "usage":
+                    if panel_usage:
                         def call(tokens):
                             return {"usage": {"input_tokens": tokens, "output_tokens": 15, "cached_input_tokens": 1200}}
-                        chunks[-1]["panda"] = {"mode": "panel", "agents": [call(75000), call(75000)],
-                            "synthesis": call(160000), "charge": {"schema_version": "panda.usd-amount.v1",
-                            "currency": "USD", "minor_units": "13"}}
+                        prompt = 250000 if mode == "oversized-context" else 75000
+                        state.recorder.settle(admitted, "completed")
+                        admitted["cents"] = 13
+                        chunks[-1]["panda"] = dict(self.settlement(admitted), mode="panel",
+                            agents=[call(prompt), call(75000)], synthesis=call(160000))
                     if (body.get("stream_options") or {}).get("include_usage"):
                         chunks.append(dict(base, choices=[], usage=usage))
                     payload = ("".join("data: " + compact(chunk) + "\n\n" for chunk in chunks) +
@@ -324,7 +336,7 @@ class Handler(BaseHTTPRequestHandler):
                 status, record["response_mode"] = 404, "unsupported_route"
                 payload = compact({"error": {"message": "Route not provided by this Chat Completions fixture.", "type": "invalid_request_error", "code": "route_not_found"}}).encode()
             record.update(response_status=status, response_content_type=content_type)
-            if admitted:
+            if admitted and admitted["status"] == "running":
                 state.recorder.settle(admitted, "completed")
             self.reply(status, content_type, payload)
         except (BrokenPipeError, ConnectionResetError) as error:

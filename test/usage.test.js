@@ -10,13 +10,14 @@ const base = { content:[{type:"text",text:"abcd"}], usage:{input:220000,output:4
   totalTokens:225045,cost:{total:0}} };
 const charge={schema_version:"panda.usd-amount.v1",currency:"USD",minor_units:"13"};
 
-test("direct and routed Panels preserve aggregate components and price but compact on one conversation", () => {
+test("direct and routed Panels expose one conversation to all Pi token checks and keep separate spending details", () => {
   for (const id of ["panel:panda","auto:quality","auto"]) {
     const usage=responseUsage({id});
     usage.request('{"messages":[]}');
-    usage.chunk({panda:{mode:"panel",agents:[count(75000,15),count(74000,15)],synthesis:count(160000,15),charge}});
-    const out=usage.finish(base).usage;
-    assert.equal(out.totalTokens,75015); assert.equal(out.input+out.output+out.cacheRead+out.cacheWrite,225045);
+    usage.chunk({panda:{version:"panda.chat.v1",status:"completed",mode:"panel",agents:[count(75000,15),count(74000,15)],synthesis:count(160000,15),charge}});
+    const message=usage.finish(base), out=message.usage;
+    assert.deepEqual([out.input,out.cacheRead,out.cacheWrite,out.output,out.totalTokens],[74900,100,0,15,75015]);
+    assert.deepEqual(message.diagnostics[0].details,{input:220000,output:45,cacheRead:5000,cacheWrite:0,totalTokens:225045});
     assert.equal(out.cost.total,0.13); assert.equal(out.cost.totalFromProvider,true);
   }
   const partial=responseUsage({id:"panel:panda"});
@@ -30,6 +31,11 @@ test("direct and routed Panels preserve aggregate components and price but compa
   const single=responseUsage({id:"auto"});
   single.chunk({panda:{mode:"single"}}); assert.deepEqual(single.finish(base),base);
   assert.equal(base.usage.totalTokens,225045);
+  const large=responseUsage({id:"panel:panda"});
+  large.chunk({panda:{mode:"panel",agents:[count(250000,4)],synthesis:count(280000,15)}});
+  const actual=large.finish(base).usage;
+  assert.equal(actual.input+actual.cacheRead,250000);
+  assert.equal(actual.totalTokens,250015);
 });
 
 test("Panel transport honors explicit short and long timeouts and a ten-minute standalone default", async () => {

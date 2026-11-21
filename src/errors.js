@@ -21,6 +21,13 @@ const nestedField = /^(?:tools\[\d{1,3}\]\.(?:type|function(?:\.(?:name|descript
 const runId = /^(?:run[-_])?(?:[a-f0-9]{32}|[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})$/i;
 const requestId = /^req_[0-9a-f]{32}$/;
 const asId = (value, pattern) => typeof value === "string" && value.length <= 64 && pattern.test(value) ? value : undefined;
+// Zero's public inference hop enforces this whole-response byte limit for JSON and SSE.
+export const maxAnswerBytes = 4_194_304;
+
+export function supportId(headers) {
+  const value = headers.get("x-panda-request-id");
+  return value && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value) ? value : undefined;
+}
 
 function safeParam(value) {
   if (typeof value !== "string" || value.length > 128) return null;
@@ -34,27 +41,31 @@ export function usd(value) {
     ? { schema_version: "panda.usd-amount.v1", currency: "USD", minor_units: value.minor_units } : undefined;
 }
 
-export async function boundedJSON(response, limit = 16_384, timeout = 1000) {
-  if (!response.body || response.bodyUsed || response.body.locked || Number(response.headers.get("content-length")) > limit) return;
+export async function boundedJSON(response, limit = maxAnswerBytes, timeout = 10_000, signal) {
+  if (signal?.aborted || !response.body || response.bodyUsed || response.body.locked ||
+      Number(response.headers.get("content-length")) > limit) return;
   const reader = response.clone().body.getReader();
   // Cancellation of the cloned tee may wait for its other branch. Never await it.
   let expired = false;
-  const timer = setTimeout(() => { expired = true; void reader.cancel().catch(() => {}); }, timeout);
+  const cancel = () => { expired = true; void reader.cancel().catch(() => {}); };
+  const timer = setTimeout(cancel, timeout);
+  signal?.addEventListener("abort", cancel, { once: true });
   const chunks = [];
   let size = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (expired) return;
-      if (done) return JSON.parse(Buffer.concat(chunks, size).toString("utf8"));
+      if (done) return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size)));
       size += value.byteLength;
       if (size > limit) return;
-      chunks.push(value);
+      if (value.byteLength) chunks.push(value);
     }
   } catch {
     return;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
     void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
@@ -91,7 +102,7 @@ export function describeError(status, data, headers, canDisplay = () => true) {
   const param = safeParam(data?.error?.param);
   const panda = settlement(code, data?.panda);
   const header = headers.get("x-panda-request-id");
-  const id = asId(header, runId) ?? asId(header, requestId) ?? panda?.request_id ?? panda?.run_id;
+  const id = supportId(headers) ?? panda?.request_id ?? panda?.run_id;
   const replay = headers.get("idempotency-replayed")?.toLowerCase() === "true" || panda?.replay === true;
   if (panda && !panda.run_id && asId(header, runId)) panda.run_id = header;
   if (panda && replay) panda.replay = true;
@@ -115,7 +126,7 @@ export function describeError(status, data, headers, canDisplay = () => true) {
              ["request_invalid", "authority_revoked", "input_too_large"].includes(code)) {
     message += " " + unknownOutcome;
   } else if (throttle) {
-    message += " Panda could not admit the request within the permitted wait.";
+    message += " Panda did not admit this request. No charge was incurred.";
   }
   for (const part of [code && "Code: " + code + ".", param && "Parameter: " + param + ".", id && "Panda request ID: " + id + "."]) {
     if (part && canDisplay(message + " " + part)) message += " " + part;

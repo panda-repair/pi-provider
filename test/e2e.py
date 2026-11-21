@@ -248,16 +248,19 @@ def main():
             if layer == "transport" and fault == "definite":
                 scenario = "definite_proxy"
             throttle = fault in ("prehold", "concurrency")
+            retry_throttle = throttle and layer == "transport"
             chat, _, marker, result, recorder = capture(label, model, scenario,
-                extension=fault == "changed_body", expect=0 if throttle else 1)
+                extension=fault == "changed_body", expect=0 if retry_throttle else 1)
             keys = [key(r) for r in chat]
-            if throttle:
+            if retry_throttle:
                 assert len(chat) == 3 and keys[0] == keys[1] != keys[2] and marker in result.stdout, label
                 assert chat[0]["raw_body"] == chat[1]["raw_body"], label
                 assert len(recorder.runs) == 2, label
             else:
                 assert len(chat) == 1, label
-                if fault == "funding":
+                if throttle:
+                    assert not recorder.runs and "No charge was incurred" in result.stderr, label
+                elif fault == "funding":
                     assert not recorder.runs, label
                 elif fault == "definite":
                     assert "US$0.00" in result.stderr, label
@@ -308,17 +311,24 @@ def main():
              "logprobs", "zero", "unequal", "neutral", "history", "large", "malformed-pointer", "null-target",
              "boolean-root", "prefix-and-items", "patterns-and-additional"]
     modes += ["virtual", "standalone", "large-failed-turn", "settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"]
-    modes += ["sdk-picker"]
+    modes += ["refused-manual", "refused-branch", "panel-context", "routed-context", "oversized-context", "support-cut",
+              "settled-abort", "settled-callback", "large-receipt", "sdk-picker", "paid-compaction", "paid-branch"]
     for mode in modes:
         target = "auto:quality" if mode == "usage" else "panel:panda" if mode == "timeout" else "auto:cost"
-        if mode in ("virtual", "large-failed-turn"):
+        if mode in ("virtual", "large-failed-turn", "panel-context", "oversized-context", "large-receipt"):
             target = "panel:panda"
+        if mode == "routed-context":
+            target = "auto:quality"
         fault = {"summary": "cut_200", "branch": "drop_completed", "virtual": "panel_failed_paid",
-                 "large-failed-turn": "server_500"}.get(mode, mode)
+                 "large-failed-turn": "server_500", "refused-manual": "content-filter", "refused-branch": "content-filter",
+                 "support-cut": "cut_200", "settled-abort": "settled-cut", "settled-callback": "settled-cut",
+                 "large-receipt": "panel_failed_large"}.get(mode, mode)
         chat, listed, _, _, recorder = capture("native-" + mode, target, fault, native=mode)
         bodies = [r["body"] for r in chat]
         if mode == "sdk-picker":
             assert not chat and len(listed) == 2, mode
+        elif mode in ("oversized-context", "paid-compaction"):
+            assert len(chat) == 2 and key(chat[0]) != key(chat[1]), mode
         elif mode in ("summary", "branch"):
             assert len(chat) == 2 and key(chat[0]) != key(chat[1]), mode
             assert len(recorder.runs) == 2, mode
