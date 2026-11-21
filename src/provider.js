@@ -93,6 +93,10 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
     const token = inferenceToken(credential?.key ?? await ctx.env("PANDA_API_TOKEN"));
     signal.throwIfAborted();
     effective = expectedTag(token);
+    if (effective !== cached) verifiedCommand = undefined;
+    // A request can resolve a different key while Pi is fetching the command's catalog.
+    if (commandRefresh?.signal === signal) commandRefresh.credentialTag = effective;
+    else if (commandRefresh?.credentialTag && commandRefresh.credentialTag !== effective) commandRefresh = undefined;
     checkedDefault = credential ? undefined : effective;
     const configured = pickerKey?.();
     resolvedDefault = configured?.defaultEnv ? expectedTag(inferenceToken(configured.key)) : undefined;

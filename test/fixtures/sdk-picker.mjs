@@ -29,13 +29,48 @@ async function renderedPicker(dist, selected, runtime) {
   } finally { picker.dispose(); }
 }
 
+async function checkRequestRotation({ dist, selected, denied, runtime, agentDir, token, signal, context }) {
+  const steps = [];
+  const use = key => writeFileSync(join(agentDir, "token"), key);
+  const checkRows = async (phase, expected, helperCalls) => {
+    const ids = rows => rows.map(row => row.id).sort();
+    const available = ids(await runtime.getAvailable("panda", { signal }));
+    const allAvailable = ids(await runtime.getAllAvailable("panda", { signal }));
+    assert.deepEqual(available, expected, phase);
+    assert.deepEqual(allAvailable, expected, phase);
+    assert.equal(readFileSync(join(agentDir, "calls")).length, helperCalls, phase);
+    steps.push({ phase, available, allAvailable, helperCalls });
+  };
+  const refused = async model => {
+    // Resolve the real command credential for this request. It may have changed since discovery.
+    const result = await runtime.complete(model, context, { signal });
+    assert.equal(result.stopReason, "error");
+    assert.match(result.errorMessage, /no cached grant/);
+  };
+  use(token);
+  assert.deepEqual(await renderedPicker(dist, selected, runtime), ["auto:cost"]);
+  await checkRows("catalog A", ["auto:cost"], 1);
+  await refused(denied);
+  await checkRows("request A", ["auto:cost"], 2);
+  use(token + "_panel");
+  await refused(selected);
+  await checkRows("request B", [], 3);
+  use(token);
+  await refused(denied);
+  await checkRows("request A before refresh", [], 4);
+  use(token + "_panel");
+  assert.deepEqual(await renderedPicker(dist, selected, runtime), ["panel:panda-quality"]);
+  await checkRows("catalog B", ["panel:panda-quality"], 5);
+  console.log(JSON.stringify({ steps }));
+}
+
 export async function checkVisiblePicker(pi, signal, dist, mode) {
   const cwd = process.cwd();
   const agentDir = join(cwd, mode);
   mkdirSync(agentDir, { recursive: true });
   copyPackageSettings(process.env.PI_CODING_AGENT_DIR, agentDir);
   const token = process.env.PANDA_API_TOKEN;
-  if (mode === "picker-command") {
+  if (mode.startsWith("picker-command")) {
     delete process.env.PANDA_API_TOKEN;
     process.env.PANDA_FIXTURE_HELPER_DIR = agentDir;
     writeFileSync(join(agentDir, "calls"), "");
@@ -58,6 +93,10 @@ export async function checkVisiblePicker(pi, signal, dist, mode) {
   try {
     await session.bindExtensions({ mode: "print" });
     const context = { messages: [{ role: "user", content: "Denied fixture request.", timestamp: 1 }] };
+    if (mode === "picker-command-auth-rotation") {
+      await checkRequestRotation({ dist, selected, denied, runtime, agentDir, token, signal, context });
+      return;
+    }
     if (mode === "picker-command") {
       const calls = () => readFileSync(join(agentDir, "calls")).length;
       const available = async () => (await runtime.getAvailable("panda", { signal })).map(row => row.id).sort();

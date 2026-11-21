@@ -176,6 +176,49 @@ test("command grants require a matching published refresh with no stored credent
   assert.deepEqual(visible(), []);
 });
 
+test("a different resolved credential invalidates command grants until a successful catalog refresh", async () => {
+  const source = { command: "!fixture", runtime: {} };
+  const { provider, refresh, requests } = rig(() => source);
+  const rows = modelDefinitions(baseUrl);
+  const check = expected => {
+    for (const filter of [provider.filterModels, provider.filterAllModels]) {
+      assert.deepEqual(filter(rows).map(row => row.id), expected);
+    }
+  };
+  const resolve = key => provider.auth.apiKey.resolve({ credential: { key }, ctx: { env: () => undefined }, signal });
+  for (const other of ["pnd_it_changed", "invalid", undefined]) {
+    await refresh({ allowNetwork: false, credential: undefined });
+    await resolve("pnd_it_local");
+    await refresh();
+    await resolve("pnd_it_local");
+    check(["auto", "auto:cost"]);
+    await resolve(other);
+    check([]);
+    await resolve("pnd_it_local");
+    check([]);
+  }
+  assert.equal(requests.length, 3);
+});
+
+test("a catalog response already in flight cannot restore an invalidated command grant", async () => {
+  const source = { command: "!fixture", runtime: {} };
+  const { provider, refresh, respond } = rig(() => source);
+  const resolve = (key, signal) => provider.auth.apiKey.resolve({ credential: { key }, ctx: {}, signal });
+  const otherSignal = new AbortController().signal;
+  const started = Promise.withResolvers();
+  const reply = Promise.withResolvers();
+  respond(() => { started.resolve(); return reply.promise; });
+  await refresh({ allowNetwork: false, credential: undefined });
+  await resolve("pnd_it_local", signal);
+  const pending = refresh();
+  await started.promise;
+  await resolve("pnd_it_changed", otherSignal);
+  await resolve("pnd_it_local", otherSignal);
+  reply.resolve(Response.json({ data: [{ id: "panel:panda" }] }));
+  await pending;
+  assert.deepEqual(provider.filterModels(modelDefinitions(baseUrl)), []);
+});
+
 test("router IDs require a listed coding route and the router's own grant", () => {
   const routers = ["auto", "auto:cost", "auto:quality"];
   assert.equal(new Set(backendGrants).size, 2);

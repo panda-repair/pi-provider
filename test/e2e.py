@@ -130,7 +130,7 @@ def main():
             server.scenario = fault
             if native in ("picker-env", "picker-config"):
                 server.models = ("auto:cost", mock.BACKEND_GRANTS[0])
-            if native == "picker-command":
+            if native in ("picker-command", "picker-command-auth-rotation"):
                 token = server.expected_token
                 server.credential_models = {token: ("auto:cost", mock.BACKEND_GRANTS[0]),
                                            token + "_panel": ("panel:panda-quality",), token + "_empty": ()}
@@ -319,7 +319,7 @@ def main():
     modes += ["virtual", "standalone", "large-failed-turn", "settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"]
     modes += ["refused-manual", "refused-branch", "panel-context", "routed-context", "oversized-context", "support-cut",
               "settled-abort", "settled-callback", "large-receipt", "sdk-picker", "paid-compaction", "paid-branch"]
-    modes += ["picker-env", "picker-config", "picker-command"]
+    modes += ["picker-env", "picker-config", "picker-command", "picker-command-auth-rotation"]
     modes += ["saved-standalone", "saved-custom-manual", "saved-custom-branch", "saved-default-decoy", "saved-explicit",
               "saved-tool", "aggregate-present", "aggregate-zero", "aggregate-missing", "aggregate-null"]
     for mode in modes:
@@ -340,6 +340,8 @@ def main():
             assert len(listed) == 1 and not chat, mode
         elif mode == "picker-command":
             assert len(listed) == 3 and not chat and not recorder.runs, mode
+        elif mode == "picker-command-auth-rotation":
+            assert len(listed) == 2 and not chat and not recorder.runs, mode
         elif mode == "sdk-picker":
             assert not chat and len(listed) == 3, mode
         elif mode.startswith("saved-"):
