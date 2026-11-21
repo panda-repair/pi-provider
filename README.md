@@ -1,6 +1,6 @@
 # Panda for Pi
 
-Use Panda’s three Auto selectors and two Panels with Pi’s built-in coding tools. This package targets Pi 1.5.2 and requires a Panda endpoint with ADR 0079 slice C enabled.
+Use Panda’s three Auto selectors and two Panels with Pi’s built-in coding tools. This package supports Pi 1.5.2 and 1.6.0 and requires a Panda endpoint with ADR 0079 slice C enabled.
 
 ## Install and sign in
 
@@ -8,7 +8,7 @@ Use Panda’s three Auto selectors and two Panels with Pi’s built-in coding to
 pi install npm:@panda-repair/pi-provider
 ```
 
-Start Pi, enter `/login panda`, and paste a personal Panda inference token beginning with `pnd_it_`. Pi 1.5.2 shows the full token as you enter it, then saves it in its credential store. For headless use or to keep the token off the Pi screen, set `PANDA_API_TOKEN` before starting Pi or configure a credential command in Pi’s `models.json`. The token saved by `/login` takes precedence over `PANDA_API_TOKEN`. To switch to the environment token, use `/logout`, choose Panda, and restart Pi. [Pi setup guide](https://panda.repair/products/llm-api/coding-agents/setup#agents-pi)
+Start Pi, enter `/login panda`, and paste a personal Panda inference token beginning with `pnd_it_`. Pi shows the full token as you enter it, then saves it in its credential store. For headless use or to keep the token off the Pi screen, set `PANDA_API_TOKEN` before starting Pi or configure a credential command in Pi’s `models.json`. The token saved by `/login` takes precedence over `PANDA_API_TOKEN`. To switch to the environment token, use `/logout`, choose Panda, and restart Pi. [Pi setup guide](https://panda.repair/products/llm-api/coding-agents/setup#agents-pi)
 
 ```sh
 pi --list-models panda
@@ -57,7 +57,7 @@ Custom extensions that save Panda spending in a checkpoint, tool result or expli
 
 ## Panel timeouts
 
-Panels can take several minutes before returning their first response. For a ten-minute deadline in Pi 1.5.2, set the following in Pi’s `settings.json`. Pi’s default HTTP idle timeout is five minutes. If you also set `retry.provider.timeoutMs`, it selects the provider deadline independently. Explicit per-call and Pi timeouts are preserved.
+Panels can take several minutes before returning their first response. For a ten-minute deadline, set the following in Pi’s `settings.json`. Pi’s default HTTP idle timeout is five minutes. If you also set `retry.provider.timeoutMs`, it selects the provider deadline independently. Explicit per-call and Pi timeouts are preserved.
 
 ```json
 { "httpIdleTimeoutMs": 600000, "retry": { "provider": { "timeoutMs": 600000 } } }

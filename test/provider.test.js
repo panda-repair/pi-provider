@@ -58,7 +58,7 @@ test("endpoint normalization includes the default and preserves an overridden AP
   }
 });
 
-test("native API-key login masks and validates the pasted token, with stored credentials preferred over environment", async () => {
+test("native API-key login requests secret input and validates the pasted token, with stored credentials preferred over environment", async () => {
   const { provider } = rig();
   const { apiKey } = provider.auth;
   const credential = await apiKey.login({ signal, prompt: async prompt => {

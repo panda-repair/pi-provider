@@ -8,6 +8,8 @@ import { configuredToken, createPandaProvider, normalizeBaseUrl } from "./src/pr
 import { isPandaSelector } from "./src/catalog.js";
 import { settlementAccounting } from "./src/usage.js";
 
+const verifiedPickerHost = ["1.5.2", "1.6.0"].includes(VERSION);
+
 // Pi checks that configured variables exist when listing, but passes only stored
 // credentials into filterModels. Resolve only the literal or variables explicitly
 // named in Panda’s configuration. Leave credential commands to the inference path.
@@ -24,7 +26,6 @@ function isStockList() {
 }
 
 async function stockListConfig() {
-  if (VERSION !== "1.5.2" || !isStockList()) return;
   try {
     // The stock CLI exits before session_start. Use its model parser for exactly
     // the file that the stock CLI opened, including JSON comments and BOMs.
@@ -40,16 +41,18 @@ export const withPandaModelRuntime = runtime => pi => pandaExtension(pi, runtime
 
 export default async function pandaExtension(pi, callerRuntime) {
   let runtime = callerRuntime;
-  const cliConfig = await stockListConfig();
+  const stockList = verifiedPickerHost && isStockList();
+  const cliConfig = stockList ? await stockListConfig() : undefined;
   const accounting = settlementAccounting();
   const provider = createPandaProvider({
     baseUrl: normalizeBaseUrl(process.env.PANDA_BASE_URL), streams: openAICompletionsApi(),
     accounting, pickerKey() {
-      if (!runtime && !cliConfig) return { unbound: true };
-      // Pi 1.5.2 exposes no public provider-config accessor. Read its validated
+      if (!verifiedPickerHost) return {};
+      if (!runtime && !stockList) return { unbound: true };
+      // These Pi versions expose no public provider-config accessor. Read the validated
       // runtime snapshot, including an SDK's custom modelsPath, without resolving auth.
-      const config = runtime?.config ?? cliConfig;
-      if (VERSION !== "1.5.2" || typeof config?.getProvider !== "function" ||
+      const config = runtime ? runtime.config : cliConfig;
+      if (typeof config?.getProvider !== "function" ||
           typeof config.getError !== "function" || config.getError()) return {};
       return pickerCredential(config.getProvider("panda")?.apiKey);
     },

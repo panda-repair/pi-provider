@@ -1,9 +1,10 @@
 {
   "name": "@panda-repair/pi-provider",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Use Panda Auto selectors and Panels with Pi’s coding tools.",
   "type": "module",
   "license": "MIT",
+  "repository": {"type": "git", "url": "git+https://github.com/panda-repair/pi-provider.git"},
   "keywords": ["pi-package"],
   "pi": {
     "extensions": ["./index.js"]

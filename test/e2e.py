@@ -73,7 +73,7 @@ def check_fixture_ledger(mock):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pi", type=Path, required=True, help="Pi 1.5.2 executable")
+    parser.add_argument("--pi", type=Path, required=True, help="stock Pi 1.5.2 or 1.6.0 executable")
     parser.add_argument("--output", type=Path, required=True, help="new directory for isolated state and redacted captures")
     args = parser.parse_args()
     pi = args.pi.resolve()
@@ -110,7 +110,7 @@ def main():
 
     env["PANDA_BASE_URL"] = "http://127.0.0.1:1/v1"
     version = run(["--version"], "version").stdout.strip()
-    assert version == "1.5.2", version
+    assert version in ("1.5.2", "1.6.0"), version
     run(["install", str(ROOT)], "install")
     summary = {"pi": version, "models": {}}
     seen_keys = set()
@@ -128,6 +128,8 @@ def main():
             server.hold = 0.02
             server.recorder = mock.Recorder(folder)
             server.scenario = fault
+            if native in ("picker-env", "picker-config"):
+                server.models = ("auto:cost", mock.BACKEND_GRANTS[0])
             thread = threading.Thread(target=server.serve_forever)
             thread.start()
             try:
@@ -313,6 +315,7 @@ def main():
     modes += ["virtual", "standalone", "large-failed-turn", "settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"]
     modes += ["refused-manual", "refused-branch", "panel-context", "routed-context", "oversized-context", "support-cut",
               "settled-abort", "settled-callback", "large-receipt", "sdk-picker", "paid-compaction", "paid-branch"]
+    modes += ["picker-env", "picker-config"]
     modes += ["saved-standalone", "saved-custom-manual", "saved-custom-branch", "saved-default-decoy", "saved-explicit",
               "saved-tool", "aggregate-present", "aggregate-zero", "aggregate-missing", "aggregate-null"]
     for mode in modes:
@@ -329,7 +332,9 @@ def main():
                  "large-receipt": "panel_failed_large"}.get(mode, mode)
         chat, listed, _, _, recorder = capture("native-" + mode, target, fault, native=mode)
         bodies = [r["body"] for r in chat]
-        if mode == "sdk-picker":
+        if mode in ("picker-env", "picker-config"):
+            assert len(listed) == 1 and not chat, mode
+        elif mode == "sdk-picker":
             assert not chat and len(listed) == 3, mode
         elif mode.startswith("saved-"):
             admissions = 3 if mode == "saved-default-decoy" else 2 if mode.startswith("saved-custom") else 1

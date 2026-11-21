@@ -258,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.reply(401, "application/json", compact({"error": {"code": "inference_token_invalid",
                         "message": "private-marker-token"}}).encode())
                     return
-                result = {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "mock"} for m in MODELS]}
+                result = {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "mock"} for m in getattr(state, "models", MODELS)]}
                 payload = compact(result).encode()
             elif self.command == "POST" and route == "/v1/chat/completions" and isinstance(body, dict):
                 rejected = state.refusal(body) if hasattr(state, "refusal") else None
