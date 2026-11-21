@@ -308,6 +308,7 @@ def main():
              "logprobs", "zero", "unequal", "neutral", "history", "large", "malformed-pointer", "null-target",
              "boolean-root", "prefix-and-items", "patterns-and-additional"]
     modes += ["virtual", "standalone", "large-failed-turn", "settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"]
+    modes += ["sdk-picker"]
     for mode in modes:
         target = "auto:quality" if mode == "usage" else "panel:panda" if mode == "timeout" else "auto:cost"
         if mode in ("virtual", "large-failed-turn"):
@@ -316,7 +317,9 @@ def main():
                  "large-failed-turn": "server_500"}.get(mode, mode)
         chat, listed, _, _, recorder = capture("native-" + mode, target, fault, native=mode)
         bodies = [r["body"] for r in chat]
-        if mode in ("summary", "branch"):
+        if mode == "sdk-picker":
+            assert not chat and len(listed) == 2, mode
+        elif mode in ("summary", "branch"):
             assert len(chat) == 2 and key(chat[0]) != key(chat[1]), mode
             assert len(recorder.runs) == 2, mode
         elif mode == "standalone":

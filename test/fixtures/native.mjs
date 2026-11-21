@@ -5,6 +5,11 @@ import { pathToFileURL } from "node:url";
 const [dist, mode, id] = process.argv.slice(2);
 const pi = await import(pathToFileURL(join(dist, "index.js")));
 const signal = AbortSignal.timeout(30_000);
+if (mode === "sdk-picker") {
+  const { checkSdkPicker } = await import("./sdk-picker.mjs");
+  await checkSdkPicker(pi, signal);
+  process.exit(0);
+}
 const services = await pi.createAgentSessionServices({
   cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR, modelRuntimeSignal: signal,
 });

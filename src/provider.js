@@ -54,6 +54,7 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
   let hostEndpoint;
   let effective;
   let resolvedDefault;
+  let checkedDefault;
   let cached;
   let discoveryFailure;
   let granted = [];
@@ -63,6 +64,7 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
     hostEndpoint = url;
     cached = Array.isArray(entry?.models) && /^panda-v[12]-[a-f0-9]{64}$/.test(entry.etag) ? entry.etag : undefined;
     granted = [];
+    checkedDefault = undefined;
     if (!cached) return;
     if (cached.startsWith("panda-v1-")) {
       // Versions with a seven-model catalog stored backend entitlements as model rows.
@@ -87,6 +89,7 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
     const token = inferenceToken(credential?.key ?? await ctx.env("PANDA_API_TOKEN"));
     signal.throwIfAborted();
     effective = expectedTag(token);
+    checkedDefault = credential ? undefined : effective;
     const configured = pickerKey?.();
     resolvedDefault = configured?.defaultEnv ? expectedTag(inferenceToken(configured.key)) : undefined;
     if (token) return { auth: { apiKey: token, ...(hostEndpoint && { baseUrl: hostEndpoint }) }, source: credential?.key ? "stored Panda token" : "PANDA_API_TOKEN" };
@@ -106,6 +109,7 @@ export function createPandaProvider({ baseUrl, streams, fetchImpl = fetch, picke
     const configured = credential?.key ? undefined : pickerKey?.();
     const local = configured ? expectedTag(inferenceToken(configured.key)) : undefined;
     const identity = credential?.key ? expectedTag(inferenceToken(credential.key)) :
+      configured?.unbound ? checkedDefault :
       !configured || (configured.defaultEnv && effective && local === resolvedDefault) ? effective : local;
     if (!cached || identity !== cached) return [];
     const allowed = new Set(granted.map(model => model.id));
