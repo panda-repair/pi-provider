@@ -2,8 +2,6 @@
   "date": "2026-11-21",
   "package": "@panda-repair/pi-provider@0.1.0",
   "scope": "Isolated Pi 1.5.2 on macOS with loopback transports, synthetic credentials and simulated settlements",
-  "comparisonBase": "29f7c217b45117768a6e62fcdab69afc4800265e",
-  "runtimeRevision": "0c6badf173678a0eaf6cc02643e2b6dce7d38a93",
   "sources": {
     "serverContract": "31d6d025b9f24ca2769156121400c3b19dd3eff5",
     "codingAgentGuide": "71e0f63d6b34f7cb2457289afe0e28808b1a87a0",
@@ -44,40 +42,42 @@
     "node": "v24.21.0",
     "npm": "11.19.0"
   },
+  "comparisonBase": "7a6fb13b27bbb4265d87421d25129eafad4f89b3",
+  "runtimeRevision": "851f7a19e68768b139dd22e2ce37a078f8429264",
   "reviewedBaselineArchive": {
-    "commit": "29f7c217b45117768a6e62fcdab69afc4800265e",
-    "sha256": "fc9875966ef70816dee79c5ee01698f76b783d6e0ba77712efd1966acf0e0794",
-    "packed_bytes": 16744,
-    "unpacked_bytes": 48610,
+    "commit": "7a6fb13b27bbb4265d87421d25129eafad4f89b3",
+    "sha256": "28399e09186263a0a3f3de03908d5734712ce8f8ce3952783a2eac2e1781271b",
+    "packed_bytes": 19369,
+    "unpacked_bytes": 57533,
     "fileCount": 11
   },
   "releaseArchive": {
     "name": "@panda-repair/pi-provider@0.1.0",
-    "sha256": "28399e09186263a0a3f3de03908d5734712ce8f8ce3952783a2eac2e1781271b",
-    "bytes": 19369,
-    "unpackedBytes": 57533,
+    "sha256": "d258276bebb3d42f4dbc8161c290325b47fd90dd882125d75540487ada2834f0",
+    "bytes": 19875,
+    "unpackedBytes": 59225,
     "fileCount": 11,
     "sourceSHA256": {
       "LICENSE": "61f97aef30fe1f6f67e3fa62269c9889bb029e7452c5ea796512a27e38f069d4",
       "src/catalog.js": "7fc3397e3857559b4d4ef2f6413a0cd775eb320507a9522cd5200d002f129dca",
       "src/errors.js": "59bf2a6ac37376a022249d82400271399265ec7c8edc672ef482a8a4d6706986",
-      "index.js": "2e9b18a18d41f5c19386f29d7ff26c8b9090bea9ccf100ea05cc280bd9297207",
+      "index.js": "0d21dd348464c929056988eb236ceb44a65c4b912e73055980a2d462396f5653",
       "src/provider.js": "9c067d7aee34da4a497176b9f17581b40d06a7afa5034b821e4d5c771c8d8696",
-      "src/request.js": "96776b40cf9ad0ff7d1acdd90256c3576adc4eab51b899eb31a892cd492e9aab",
-      "src/stream.js": "ca195380e256b6cc61de7f22f39c8f7a638ab652e9e7b8d49a4e246d555ef6b0",
-      "src/usage.js": "f92c42dd08022f30b1adf94862ca397cbcba1fa05f4885473d6ea61b6500b52d",
+      "src/request.js": "cb09516e275ca9a8d3201f22bf2b2ead2ad506a7811f66f6df59249c337dbaac",
+      "src/stream.js": "cebc6a36b986148d7a99d720cde04107217b18ac7567be83f5a6da3061075d7f",
+      "src/usage.js": "77dfab3d611089cec9bd78e0eea03a329ff842d111ce8c73480c9b02d97bfbd7",
       "package.json": "7b3e8eb306f2216053b01e78b1aff44457b8621917b08f8c7eb3a463f6ad99b8",
       "src/routing-backend-grants.json": "be75d8e22fbb34cae2556b37877e2ff96f064b83f4c97cad6325aa90170ebe98",
-      "README.md": "c840eabe43b6d89bdb36693a72d9d42fb2260cdb0b1dc77890b0b45d53f6cd72"
+      "README.md": "f49c7310fa6eceda962ab9076aba28153c4dc1ebc33e1586a3ffd64781738452"
     },
     "dryRunMatched": true,
     "offlineInstallByteIdentical": true
   },
   "checkout": {
-    "unitTests": 31,
-    "scenarios": 87,
-    "catalogGET": 95,
-    "chatPOST": 103,
+    "unitTests": 32,
+    "scenarios": 97,
+    "catalogGET": 113,
+    "chatPOST": 130,
     "toolTurns": {
       "auto": {
         "discovery": 1,
@@ -110,107 +110,113 @@
         "markerInToolResultAndFinalOutput": true
       }
     },
-    "newNativeCases": {
-      "refused-manual": {
-        "discovery": 1,
-        "http": [
-          200
-        ],
-        "posts": 1,
-        "keys": 1,
-        "admissions": 1
-      },
-      "refused-branch": {
-        "discovery": 1,
-        "http": [
-          200
-        ],
-        "posts": 1,
-        "keys": 1,
-        "admissions": 1
-      },
-      "panel-context": {
-        "discovery": 2,
-        "http": [
-          200
-        ],
-        "posts": 1,
-        "keys": 1,
-        "admissions": 1
-      },
-      "routed-context": {
-        "discovery": 2,
-        "http": [
-          200
-        ],
-        "posts": 1,
-        "keys": 1,
-        "admissions": 1
-      },
-      "oversized-context": {
-        "discovery": 2,
-        "http": [
-          200,
-          200
-        ],
-        "posts": 2,
-        "keys": 2,
-        "admissions": 2
-      },
-      "support-cut": {
-        "discovery": 1,
-        "http": [
-          200
-        ],
-        "posts": 1,
-        "keys": 1,
-        "admissions": 1
-      },
-      "settled-abort": {
-        "discovery": 1,
-        "http": [
-          500
-        ],
-        "posts": 1,
-        "keys": 1,
-        "admissions": 1
-      },
-      "settled-callback": {
-        "discovery": 1,
-        "http": [
-          500
-        ],
-        "posts": 1,
-        "keys": 1,
-        "admissions": 1
-      },
-      "large-receipt": {
-        "discovery": 1,
-        "http": [
-          502
-        ],
-        "posts": 1,
-        "keys": 1,
-        "admissions": 1
-      },
+    "receiptAndTrailerCases": {
       "sdk-picker": {
-        "discovery": 2,
+        "discovery": 3,
         "http": [],
         "posts": 0,
         "keys": 0,
         "admissions": 0
       },
-      "paid-compaction": {
-        "discovery": 1,
+      "saved-standalone": {
+        "discovery": 3,
         "http": [
           200,
-          200
+          409,
+          409
+        ],
+        "posts": 3,
+        "keys": 3,
+        "admissions": 1
+      },
+      "saved-custom-manual": {
+        "discovery": 2,
+        "http": [
+          200,
+          200,
+          409,
+          409,
+          409
+        ],
+        "posts": 5,
+        "keys": 5,
+        "admissions": 2
+      },
+      "saved-custom-branch": {
+        "discovery": 2,
+        "http": [
+          200,
+          200,
+          409,
+          409,
+          409
+        ],
+        "posts": 5,
+        "keys": 5,
+        "admissions": 2
+      },
+      "saved-default-decoy": {
+        "discovery": 2,
+        "http": [
+          200,
+          200,
+          200,
+          409,
+          409,
+          409
+        ],
+        "posts": 6,
+        "keys": 6,
+        "admissions": 3
+      },
+      "saved-explicit": {
+        "discovery": 2,
+        "http": [
+          200,
+          409
         ],
         "posts": 2,
         "keys": 2,
-        "admissions": 2
+        "admissions": 1
       },
-      "paid-branch": {
+      "saved-tool": {
+        "discovery": 2,
+        "http": [
+          200,
+          409
+        ],
+        "posts": 2,
+        "keys": 2,
+        "admissions": 1
+      },
+      "aggregate-present": {
+        "discovery": 1,
+        "http": [
+          200
+        ],
+        "posts": 1,
+        "keys": 1,
+        "admissions": 1
+      },
+      "aggregate-zero": {
+        "discovery": 1,
+        "http": [
+          200
+        ],
+        "posts": 1,
+        "keys": 1,
+        "admissions": 1
+      },
+      "aggregate-missing": {
+        "discovery": 1,
+        "http": [
+          200
+        ],
+        "posts": 1,
+        "keys": 1,
+        "admissions": 1
+      },
+      "aggregate-null": {
         "discovery": 1,
         "http": [
           200
@@ -220,154 +226,92 @@
         "admissions": 1
       }
     },
-    "summarySHA256": "24c52e68e4f8f6c46eb48833af71bfb59d6c2c1b41cdbe9e5cbbd6ebd5e8c7d2"
+    "summarySHA256": "9b8aa1ce3882305d01e2dd0bada2b8ddff45d7dfba26970c4ac633190b744572"
   },
   "offlineTarballAcceptance": {
-    "scenarios": 65,
-    "assertions": 518,
-    "units": 31,
-    "http_posts": 4188,
-    "fixture_admissions": 4161,
-    "catalog_gets": 99,
-    "zero_response_limit": {
-      "limit": 4194304,
-      "rows": [
-        {
-          "name": "small",
-          "input": 1500,
-          "output": 1500,
-          "hops": 2,
-          "status": 502,
-          "code": "answer_invalid",
-          "charge": "3"
-        },
-        {
-          "name": "medium",
-          "input": 24714,
-          "output": 24714,
-          "hops": 2,
-          "status": 502,
-          "code": "answer_invalid",
-          "charge": "3"
-        },
-        {
-          "name": "ceiling",
-          "input": 4194304,
-          "output": 4194304,
-          "hops": 2,
-          "status": 502,
-          "code": "answer_invalid",
-          "charge": "3"
-        },
-        {
-          "name": "over",
-          "input": 4194305,
-          "output": 259,
-          "hops": 2,
-          "status": 503,
-          "code": "inference_upstream_unavailable",
-          "charge": null
-        }
-      ]
-    },
-    "cases": [
-      {"case": "refusal-manual", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "refusal-branch", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "refusal-foreground", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "bulk-physical", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "bulk-routed", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "bulk-control", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "bulk-oversized", "posts": 2, "admissions": 2, "keys": "AB"},
-      {"case": "bulk-overwindow", "posts": 2, "admissions": 2, "keys": "AB"},
-      {"case": "bulk-cached", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-small", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-medium", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-ceiling", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-ceiling-chunked", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-over", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-over-raw", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-over-raw-chunked", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-ceiling-sdk", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-over-raw-sdk", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-medium-sse", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-sse-maximum", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-sse-over-raw", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-sse-over-public", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "size-invalid-amount", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "backoff-zero", "posts": 1, "admissions": 0, "keys": "A"},
-      {"case": "backoff-one", "posts": 2, "admissions": 0, "keys": "AA"},
-      {"case": "backoff-default", "posts": 3, "admissions": 1, "keys": "AAA"},
-      {"case": "backoff-cancel", "posts": 1, "admissions": 0, "keys": "A"},
-      {"case": "backoff-submit", "posts": 2, "admissions": 1, "keys": "AA"},
-      {"case": "support-happy", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "support-invalid", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "support-invalid-cut", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "support-retry-id", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "support-private-finish", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "support-cut", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "support-trailer", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "caller-abort", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "caller-throw", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "aux-empty", "posts": 0, "admissions": 0, "keys": ""},
-      {"case": "aux-decoy", "posts": 0, "admissions": 0, "keys": ""},
-      {"case": "aux-other-path", "posts": 0, "admissions": 0, "keys": ""},
-      {"case": "aux-sdk-factory", "posts": 0, "admissions": 0, "keys": ""},
-      {"case": "aux-stock-cli", "posts": 0, "admissions": 0, "keys": ""},
-      {"case": "aux-stock-jsonc", "posts": 0, "admissions": 0, "keys": ""},
-      {"case": "ledger-bound", "posts": 1029, "admissions": 1025, "keys": "1029 distinct"},
-      {"case": "ledger-unbound", "posts": 1028, "admissions": 1025, "keys": "1028 distinct"},
-      {"case": "ledger-checkpoint-manual", "posts": 1032, "admissions": 1027, "keys": "1032 distinct"},
-      {"case": "ledger-checkpoint-branch", "posts": 1030, "admissions": 1026, "keys": "1030 distinct"},
-      {"case": "ledger-checkpoint-branch-migration", "posts": 3, "admissions": 1, "keys": "ABC"},
-      {"case": "racing-drop", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "transformed-drop", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "manual-compaction", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "auto-compaction", "posts": 2, "admissions": 2, "keys": "AB"},
-      {"case": "branch-summary", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "virtual-paid", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "retained-sse", "posts": 1, "admissions": 1, "keys": "A"},
-      {"case": "agent-funding", "posts": 1, "admissions": 0, "keys": "A"},
-      {"case": "receipt-persisted", "posts": 2, "admissions": 1, "keys": "AB"},
-      {"case": "parallel-standalone", "posts": 2, "admissions": 2, "keys": "AB"},
-      {"case": "discovery401", "posts": 0, "admissions": 0, "keys": ""},
-      {"case": "catalog", "posts": 0, "admissions": 0, "keys": ""},
-      {"case": "tool-auto", "posts": 2, "admissions": 2, "keys": "AB"},
-      {"case": "tool-auto_cost", "posts": 2, "admissions": 2, "keys": "AB"},
-      {"case": "tool-auto_quality", "posts": 2, "admissions": 2, "keys": "AB"},
-      {"case": "tool-panel_panda", "posts": 2, "admissions": 2, "keys": "AB"},
-      {"case": "tool-panel_panda-quality", "posts": 2, "admissions": 2, "keys": "AB"}
-    ]
+    "native_cases": 41,
+    "http_posts": 2186,
+    "fixture_admissions": 2101,
+    "catalog_GET": 130,
+    "foreign_loopback_posts": 2,
+    "assertionsIncludingCrossArchiveChecks": 620,
+    "exit": 0,
+    "resultSHA256": "2c52c9700115f9f8b489c4ba41b22a35dd4f310f0f1ce840b3f8ffa6f47883c2"
   },
-  "independentResultSHA256": "efc9ecd14d89bcdb8a4bbddacc5851f7ad8d37897312977a2f2bec461bde7e69",
-  "verifiedLimits": {
-    "accountingCacheIds": 1024,
-    "httpAndStreamMaximumBytesInclusive": 4194304,
-    "retriesByCallerBudget": {
-      "0": 0,
-      "1": 1,
-      "2 or more": 2
+  "historicalChecker": {
+    "cases": 69,
+    "assertions": 549,
+    "exit": 0,
+    "catalogGET": 92,
+    "chatPOST": 84,
+    "fixtureAdmissions": 55,
+    "wireComparison": {
+      "per_case": 69,
+      "keys_compared": [
+        "chatPOST",
+        "logicalAdmissions",
+        "keyGroups",
+        "actions",
+        "catalogGET",
+        "physicalModels",
+        "offOriginAttempts"
+      ],
+      "matched": true
     },
-    "defaultAdapterPreholdRetries": 2,
-    "refusedSummary": {
-      "manualAndBranchActiveUsersBeforeAndAfter": 6,
-      "newCheckpoints": 0,
-      "postsPerSummary": 1,
-      "usd": "0.00"
+    "previousCheckerSHA256": "59ac290b4b2214e82f44800cc6630a731972768d737b07108ae59aed745b13b9",
+    "correctedCheckerSHA256": "a49788965fd359d58656aaf10dcfaaed39218db5e993d123aff96e00c84c7684",
+    "changedExpectations": [
+      "content-filter",
+      "custom-credential",
+      "custom-literal",
+      "custom-composite"
+    ],
+    "resultSHA256": "96a94f2138390b3f64ba689baf7056e81003d20c6e3cd248459d4f4f1f08db2e"
+  },
+  "verifiedBehavior": {
+    "accountingAuthority": "Positive contributions tagged with a stable Panda run ID in the bound session’s saved spending entries.",
+    "customSummaryUSD": {
+      "checkpoint": 0.03,
+      "replayOfIncludedCharge": 0,
+      "firstSavedCopyOfDiscardedCharge": 0.03,
+      "repeatAfterSave": 0
     },
-    "panelContext": {
-      "normalNativeConversationTokens": 75015,
-      "originalAggregatePromptTokens": 310000,
-      "normalPostsPerTurn": 1,
-      "reportedUSD": "0.13",
-      "genuineOversizedThresholdAndOverflow": true
+    "nativeSplit": "A completed default split retained only known paid Panda legs. A same-signal custom call had no effect on the marker.",
+    "standalone": "A standalone result with no saved contribution left the first foreground receipt eligible. Session spending remains independent across sessions and restarts.",
+    "ownerRuntime": {
+      "visibleBeforeDuringAfter": [
+        "auto:cost"
+      ],
+      "rotatedVisible": [],
+      "catalogGET": 1,
+      "chatPOST": 0
     },
-    "accounting": {
-      "freshCheckpointAfterEvictionAndRestart": "Saved split-compaction and branch run IDs suppressed each earlier counted receipt and accepted a different three-cent receipt.",
-      "preexistingCheckpointMigration": "A successful checkpoint from 29f7c21 retained US$0.03 but no run ID. Its repeat added US$0.03 to Pi display again after an upgrade. No additional Panda operation was admitted for that replay.",
-      "unboundAfterEviction": "The original amount remains in the receipt. The adapter cannot verify historical spending without the original session."
-    }
+    "panelTrailer": {
+      "nativeConversationTokens": 1210,
+      "validatedUSD": 0.03,
+      "reportedAggregateTokens": 3024,
+      "reportedZeroAggregateTokens": 0,
+      "missingNullOrCutAfterSettledFinish": "Aggregate diagnostic omitted"
+    },
+    "lossOfRunIdentity": "Numeric-only copies and historical checkpoints that lack IDs can count a later receipt as first seen. No additional fixture run was admitted for replay.",
+    "directSdkWrites": "Appending the same three-cent usage snapshot twice directly to Pi saves six cents in its local ledger. No provider hook runs between these writes."
   },
   "previousVerification": {
+    "roundThree": {
+      "baseArchive": {
+        "commit": "29f7c217b45117768a6e62fcdab69afc4800265e",
+        "sha256": "fc9875966ef70816dee79c5ee01698f76b783d6e0ba77712efd1966acf0e0794",
+        "packed_bytes": 16744,
+        "unpacked_bytes": 48610,
+        "fileCount": 11
+      },
+      "runtimeRevision": "0c6badf173678a0eaf6cc02643e2b6dce7d38a93",
+      "unitTests": 31,
+      "checkoutScenarios": 87,
+      "independentScenarios": 65,
+      "independentAssertions": 518,
+      "independentResultSHA256": "efc9ecd14d89bcdb8a4bbddacc5851f7ad8d37897312977a2f2bec461bde7e69"
+    },
     "roundTwoRelease": {
       "runtimeRevision": "f2d54d41a8aeb822962e4c9d18a1828f2256573d",
       "archiveSHA256": "20535ce1f3137f82b8316693a290180e38ca48d823ebb21affa9ae59f9d33692",
