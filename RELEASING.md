@@ -1,14 +1,44 @@
 # Releasing
 
-Releases publish from GitHub Actions through npm trusted publishing. No npm token is stored in the repository.
+A maintainer approves a commit and the SHA-256 of its npm tarball, then dispatches `release.yml` from protected `main`. Only the publish job can authenticate to npm.
 
-1. Commit the new stable version in `package.json` and merge it into `main`. Once CI passes on that commit, tag it and push the tag: `git tag v<version> && git push origin v<version>`.
-2. The Release workflow checks that the tag matches the version and is on main. It then runs the unit tests and publishes with provenance.
+## Review and publish
 
-npm's trusted publisher for `@panda-repair/pi-provider` uses owner `panda-repair`, repository `pi-provider`, workflow `release.yml` and environment `npm`, with direct publishing enabled. Before enabling direct publishing, two GitHub settings must be in place:
+1. Merge the new stable version in `package.json` and wait for the **CI** main push run on that commit to succeed. Select the exact commit you reviewed and record its full SHA, tag and tarball SHA-256. Use Node 24 and a fresh checkout with umask `022` so local file permissions reproduce the release bytes.
 
-- the release-tag ruleset, so that only repository admins can create, move or delete `v*` tags;
-- in the `npm` environment, **Deployment branches and tags** set to **Selected branches and tags**, with exactly one rule of type **Tag** and the pattern `v*`, and no branches.
+   ```sh
+   sha=$(git rev-parse HEAD)
+   out=$(mktemp -d)
+   (umask 022 && git worktree add --detach "$out/source" "$sha" &&
+     cd "$out" && npm pack --offline --ignore-scripts --pack-destination "$out" "$out/source")
+   tag="v$(node -p 'require(process.argv[1]).version' "$out/source/package.json")"
+   file="$out/panda-repair-pi-provider-${tag#v}.tgz"
+   digest=$(shasum -a 256 "$file" | cut -d ' ' -f1)
+   printf '%s %s %s\n' "$sha" "$tag" "$digest"
+   git worktree remove "$out/source"
+   ```
+
+2. As a designated releaser, approve the bytes by recording the digest on its own line in the annotated tag. Tag the recorded SHA, even if `main` has advanced. Push the tag and dispatch the workflow with the same values.
+
+   ```sh
+   git tag -a "$tag" "$sha" -m "Release $tag" -m "tarball-sha256: $digest"
+   git push origin "refs/tags/$tag"
+   gh workflow run release.yml --repo panda-repair/pi-provider --ref main \
+     -f tag="$tag" -f sha="$sha" -f tarball_sha256="$digest"
+   ```
+
+The read-only job verifies the annotated tag's approval, `origin/main` ancestry, package identity, stable version and latest CI result for the commit. It packs the commit twice with lifecycle scripts disabled and requires byte-identical archives matching the tag's digest. The publish job independently checks the received tarball against the dispatch digest and publishes that file with public access. If publication needs a retry, select **Re-run all jobs** so the current tag and CI are checked again.
+
+npm generates provenance automatically. Its source revision is the workflow's dispatch SHA on `main`, which can be newer than the tagged commit. Keep the approved SHA and digest together to identify the packaged source.
+
+## Publishing settings
+
+npm's trusted publisher for `@panda-repair/pi-provider` stays configured for owner `panda-repair`, repository `pi-provider`, workflow `release.yml` and environment `npm`, with direct publishing enabled. GitHub OIDC supplies the publishing identity to npm 11.5.1 or later.
+
+- Protect `main`, including changes to CI and the release workflow.
+- Reserve creation, updates and deletion of `v*` tags for the designated releasers (repository admins) in the release-tag ruleset. The digest they put in the tag approves the exact tarball.
+- Set the `npm` environment's **Deployment branches and tags** to **Selected branches and tags**. Keep exactly one **Branch** rule for `main` and remove any **Tag** rules.
+- The project owner can also require a reviewer on the `npm` environment for a separate go-live decision.
 
 ## New Pi releases
 

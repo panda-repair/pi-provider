@@ -1,50 +1,129 @@
 name: Release
-
-# Publishes to npm when a v<version> tag on main is pushed. npm trusted publishing
-# authenticates this workflow with GitHub's OIDC token, so no npm token is stored here.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Reviewed release tag (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+      sha:
+        description: Reviewed commit (40 hexadecimal characters)
+        required: true
+        type: string
+      tarball_sha256:
+        description: Approved npm tarball SHA-256 (64 hexadecimal characters)
+        required: true
+        type: string
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
+  verify-and-pack:
+    if: github.repository_id == '1466849378' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: npm
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact_id: ${{ steps.package.outputs.artifact-id }}
+      attempt: ${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Check the tag, the branch and npm
+          package-manager-cache: false
+      - name: Verify the tag, reviewed commit and main CI
+        id: review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REVIEWED_SHA: ${{ inputs.sha }}
+          TARBALL_SHA256: ${{ inputs.tarball_sha256 }}
+        run: node .github/scripts/verify-release.mjs
+      - name: Pack the reviewed commit twice and check its digest
+        shell: bash
+        env:
+          REVIEWED_SHA: ${{ steps.review.outputs.sha }}
+          VERSION: ${{ steps.review.outputs.version }}
+          TARBALL_SHA256: ${{ steps.review.outputs.approved_digest }}
         run: |
-          version="$(node -p 'require("./package.json").version')"
-          stable='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-          if ! [[ "$version" =~ $stable ]]; then
-            echo "Expected a stable package.json version in MAJOR.MINOR.PATCH form." >&2
-            exit 1
-          fi
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match package.json version $version." >&2
-            exit 1
-          fi
-          main_sha="$(git show-ref --verify --hash refs/remotes/origin/main)"
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" "$main_sha"; then
-            echo "Tag $GITHUB_REF_NAME is not on main." >&2
-            exit 1
-          fi
-          if ! node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$(npm --version)"; then
-            echo "Trusted publishing needs npm 11.5.1 or later; this runner has $(npm --version)." >&2
-            exit 1
-          fi
+          umask 022
+          source_dir="$RUNNER_TEMP/reviewed-source"
+          git show "$REVIEWED_SHA:package.json" > "$RUNNER_TEMP/reviewed-package.json"
+          git -c core.hooksPath=/dev/null worktree add --detach "$source_dir" "$REVIEWED_SHA"
+          cd "$RUNNER_TEMP"
+          for dir in pack-one pack-two; do
+            mkdir "$dir"
+            npm pack --offline --ignore-scripts --pack-destination "$dir" "$source_dir"
+          done
+          name="panda-repair-pi-provider-$VERSION.tgz"
+          cmp "pack-one/$name" "pack-two/$name"
+          file="$RUNNER_TEMP/pi-provider-$GITHUB_RUN_ATTEMPT.tgz"
+          mv "pack-one/$name" "$file"
+          [[ -f "$file" && ! -L "$file" ]] || exit 1
+          printf '%s  %s\n' "$TARBALL_SHA256" "$file" | shasum -a 256 --check --strict
+          tar -xzOf "$file" package/package.json | cmp - "$RUNNER_TEMP/reviewed-package.json"
+      - name: Save the approved tarball as a single file
+        id: package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/pi-provider-${{ github.run_attempt }}.tgz
+          archive: false
+          if-no-files-found: error
 
-      - run: npm test
-      - run: npm publish --access public
+  publish:
+    needs: verify-and-pack
+    if: github.repository_id == '1466849378' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    env:
+      ARTIFACT_ID: ${{ needs.verify-and-pack.outputs.artifact_id }}
+      BUILD_ATTEMPT: ${{ needs.verify-and-pack.outputs.attempt }}
+      TARBALL_SHA256: ${{ inputs.tarball_sha256 }}
+    steps:
+      - name: Require the verified job's artifact ID and attempt
+        shell: bash
+        run: |
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$BUILD_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$TARBALL_SHA256" =~ ^[a-fA-F0-9]{64}$ ]] || exit 1
+          if [[ "$BUILD_ATTEMPT" != "$GITHUB_RUN_ATTEMPT" ]]; then
+            echo "Verification belongs to a different attempt. Re-run all jobs to check the tag and current CI." >&2
+            exit 1
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Check the npm trusted publishing version
+        shell: bash
+        run: |
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            if (!(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))))) {
+              throw new Error("Trusted publishing requires npm 11.5.1 or later.");
+            }' "$(npm --version)"
+      - name: Download the tarball by ID without unpacking it
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify-and-pack.outputs.artifact_id }}
+          path: ${{ runner.temp }}/approved
+          skip-decompress: true
+          digest-mismatch: error
+      - name: Recheck the approved digest and publish that tarball
+        shell: bash
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
+        run: |
+          file="$RUNNER_TEMP/approved/pi-provider-$BUILD_ATTEMPT.tgz"
+          [[ -f "$file" && ! -L "$file" ]] || exit 1
+          printf '%s  %s\n' "$TARBALL_SHA256" "$file" | shasum -a 256 --check --strict
+          npm publish "$file" --access public
