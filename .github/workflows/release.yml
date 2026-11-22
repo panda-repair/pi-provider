@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version: "24.21.0"
           package-manager-cache: false
       - name: Verify the tag, reviewed commit and main CI
         id: review
@@ -50,25 +50,14 @@ jobs:
         shell: bash
         env:
           REVIEWED_SHA: ${{ steps.review.outputs.sha }}
-          VERSION: ${{ steps.review.outputs.version }}
           TARBALL_SHA256: ${{ steps.review.outputs.approved_digest }}
         run: |
-          umask 022
-          source_dir="$RUNNER_TEMP/reviewed-source"
-          git show "$REVIEWED_SHA:package.json" > "$RUNNER_TEMP/reviewed-package.json"
-          git -c core.hooksPath=/dev/null worktree add --detach "$source_dir" "$REVIEWED_SHA"
-          cd "$RUNNER_TEMP"
-          for dir in pack-one pack-two; do
-            mkdir "$dir"
-            npm pack --offline --ignore-scripts --pack-destination "$dir" "$source_dir"
-          done
-          name="panda-repair-pi-provider-$VERSION.tgz"
-          cmp "pack-one/$name" "pack-two/$name"
           file="$RUNNER_TEMP/pi-provider-$GITHUB_RUN_ATTEMPT.tgz"
-          mv "pack-one/$name" "$file"
-          [[ -f "$file" && ! -L "$file" ]] || exit 1
+          second="$RUNNER_TEMP/second-pi-provider.tgz"
+          bash .github/scripts/pack-release.sh "$REVIEWED_SHA" "$file"
+          bash .github/scripts/pack-release.sh "$REVIEWED_SHA" "$second"
+          cmp "$file" "$second"
           printf '%s  %s\n' "$TARBALL_SHA256" "$file" | shasum -a 256 --check --strict
-          tar -xzOf "$file" package/package.json | cmp - "$RUNNER_TEMP/reviewed-package.json"
       - name: Save the approved tarball as a single file
         id: package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -100,7 +89,7 @@ jobs:
           fi
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version: "24.21.0"
           package-manager-cache: false
       - name: Check the npm trusted publishing version
         shell: bash

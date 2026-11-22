@@ -11,47 +11,40 @@ Complete these steps before merging the new workflow or pushing its first releas
 3. Only then, in **Settings → Environments → npm → Deployment branches and tags**, choose **Selected branches and tags**. Replace the old **Tag** rule for `v*` with exactly one **Branch** rule for `main`. Remove all **Tag** rules. Nacho can also require an environment reviewer for a separate go-live decision.
 4. Keep the active `v*` tag ruleset. Reserve tag creation, updates and deletion for the designated releasers. Keep npm's existing trusted publisher for `@panda-repair/pi-provider` configured with owner `panda-repair`, repository `pi-provider`, workflow filename `release.yml`, environment `npm` and direct publishing enabled.
 
-npm trusts the repository, workflow filename and environment. Changes to `.github/workflows/release.yml`, `.github/workflows/ci.yml` and `.github/scripts/verify-release.mjs` must go through the protected `main` path above. Once these controls are in place, merge the new workflow. Only its publish job can authenticate through GitHub OIDC using npm 11.5.1 or later.
+npm trusts the repository, workflow filename and environment. Changes to the release and CI workflows and their scripts in `.github/scripts/` must go through the protected `main` path above. Once these controls are in place, merge the new workflow. Only its publish job can authenticate through GitHub OIDC using npm 11.5.1 or later.
 
 ## Review and publish
 
-1. Merge the new stable version in `package.json` and wait for the **CI** main push run on that commit to succeed. From the reviewed commit, use Bash and Node 24 to pack a fresh checkout with umask `022`. Record the printed commit SHA, tag and tarball SHA-256 together.
+1. Merge the reviewed stable version in `package.json` to `main`. Wait for the latest **CI** **push** run for that exact commit to succeed. Open its **canonical-package** job summary. It links the raw `canonical-pi-provider-<attempt>.tgz` and gives its artifact ID, commit SHA and SHA-256. Copy those three values from the same attempt. If the artifact expired or a partial rerun lacks one, use **Re-run all jobs**. A commit predating the canonical job must be replaced by a reviewed commit that includes it.
+2. As a designated releaser, start in a clean checkout of the reported commit. In Bash, substitute the three values below. The commands verify the downloaded bytes against the summary, then compare every filename and its SHA-256 with a local package. Different compressors can produce different archive bytes for identical contents. The tag approves the **CI archive’s digest**. Any failed check stops the commands before tagging or dispatch.
 
    ```bash
    (
-     set -eu
-     umask 022
-     sha=$(git rev-parse --verify HEAD)
-     out=$(mktemp -d "${TMPDIR:-/tmp}/pi-release.XXXXXXXX")
-     git worktree add --quiet --detach "$out/source" "$sha"
-     trap 'git worktree remove "$out/source"' EXIT
-     tag="v$(node -p 'require(process.argv[1]).version' "$out/source/package.json")"
-     file="$out/panda-repair-pi-provider-${tag#v}.tgz"
-     (cd "$out" && npm pack --offline --ignore-scripts --loglevel=error --pack-destination "$out" "$out/source" >/dev/null)
-     checksum=$(shasum -a 256 "$file")
-     digest=${checksum%% *}
-     if ! [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
-       echo 'Expected a 64-character hexadecimal tarball SHA-256.' >&2
-       exit 1
-     fi
-     printf 'Tarball saved to %s\n' "$file" >&2
-     printf '%s %s %s\n' "$sha" "$tag" "$digest"
+     set -euo pipefail
+     sha='<full commit SHA from the canonical job>'
+     digest='<SHA-256 from the same summary>'
+     artifact_id='<artifact ID from the same summary>'
+     [[ "$sha" =~ ^[0-9a-f]{40}$ && "$digest" =~ ^[0-9a-fA-F]{64}$ && "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+     head=$(git rev-parse --verify HEAD)
+     changes=$(git status --porcelain)
+     [[ "$head" == "$sha" && -z "$changes" ]]
+     out=$(mktemp -d "${TMPDIR:-/tmp}/panda-approval.XXXXXXXX")
+     gh api "repos/panda-repair/pi-provider/actions/artifacts/$artifact_id/zip" > "$out/ci.tgz"
+     printf '%s  %s\n' "$digest" "$out/ci.tgz" | shasum -a 256 --check --strict
+     bash .github/scripts/pack-release.sh "$sha" "$out/local.tgz"
+     python3 .github/scripts/compare-package.py "$out/ci.tgz" "$out/local.tgz"
+
+     tag="v$(node -p 'require("./package.json").version')"
+     git tag -a "$tag" "$sha" -m "Release $tag" -m "tarball-sha256: $digest"
+     git push origin "refs/tags/$tag"
+     gh workflow run release.yml --repo panda-repair/pi-provider --ref main \
+       -f tag="$tag" -f sha="$sha" -f tarball_sha256="$digest"
    )
    ```
 
-2. As a designated releaser, substitute the recorded values below. Approve the bytes by recording the digest on its own line in an annotated tag pointing directly to the reviewed commit, even if `main` has advanced. Push the tag and dispatch the workflow with the same values.
+The read-only job checks the protected tag, `origin/main` ancestry, package identity, stable version and latest main-push CI artifact. It packs two clean checkouts with lifecycle scripts disabled and requires byte-identical archives matching the tag. The publish job checks the transferred tarball against the dispatch digest and publishes that file with public access. To retry the release, select **Re-run all jobs** so the current tag and CI are checked again.
 
-   ```sh
-   sha='<recorded full commit SHA>'
-   tag='<recorded release tag>'
-   digest='<recorded tarball SHA-256>'
-   git tag -a "$tag" "$sha" -m "Release $tag" -m "tarball-sha256: $digest"
-   git push origin "refs/tags/$tag"
-   gh workflow run release.yml --repo panda-repair/pi-provider --ref main \
-     -f tag="$tag" -f sha="$sha" -f tarball_sha256="$digest"
-   ```
-
-The read-only job verifies the annotated tag's approval, `origin/main` ancestry, package identity, stable version and latest CI result for the commit. It packs the commit twice with lifecycle scripts disabled and requires byte-identical archives matching the tag's digest. The publish job independently checks the received tarball against the dispatch digest and publishes that file with public access. If publication needs a retry, select **Re-run all jobs** so the current tag and CI are checked again.
+Use Node **24.21.0** for the comparison build. When changing the toolchain, update the `canonical-package` job in `.github/workflows/ci.yml` and every `setup-node` step in `.github/workflows/release.yml` together. Approve the digest from a successful main push that built with the new pin.
 
 npm generates provenance automatically. Its source revision is the workflow's dispatch SHA on `main`, which can be newer than the tagged commit. Keep the approved SHA and digest together to identify the packaged source.
 

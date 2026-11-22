@@ -42,3 +42,42 @@ jobs:
         run: npm install --global --prefix "$RUNNER_TEMP/pi" "@earendil-works/pi-coding-agent@${{ matrix.pi }}"
       - name: End-to-end scenarios
         run: python3 test/e2e.py --pi "$RUNNER_TEMP/pi/bin/pi" --output "$RUNNER_TEMP/e2e"
+
+  canonical-package:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository_id == '1466849378' && github.repository == 'panda-repair/pi-provider'
+    needs: [unit, e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - name: Build the canonical Pi tarball
+        run: bash .github/scripts/pack-release.sh "$GITHUB_SHA" "$RUNNER_TEMP/canonical-pi-provider-$GITHUB_RUN_ATTEMPT.tgz"
+      - name: Upload the raw Pi tarball
+        id: package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/canonical-pi-provider-${{ github.run_attempt }}.tgz
+          archive: false
+          if-no-files-found: error
+      - name: Record the commit and verified artifact digest
+        shell: bash
+        env:
+          DIGEST: ${{ steps.package.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.package.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.package.outputs.artifact-url }}
+        run: |
+          name="canonical-pi-provider-$GITHUB_RUN_ATTEMPT.tgz"
+          printf '%s  %s\n' "$DIGEST" "$RUNNER_TEMP/$name" | shasum -a 256 --check --strict
+          {
+            printf 'Commit %s\n\nSHA-256 %s\n\n' "$GITHUB_SHA" "$DIGEST"
+            printf '[Download %s](%s) · run %s · attempt %s · artifact ID %s\n' \
+              "$name" "$ARTIFACT_URL" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$ARTIFACT_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
