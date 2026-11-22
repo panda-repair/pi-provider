@@ -41,14 +41,14 @@ export function usd(value) {
     ? { schema_version: "panda.usd-amount.v1", currency: "USD", minor_units: value.minor_units } : undefined;
 }
 
-export async function boundedJSON(response, limit = maxAnswerBytes, timeout = 10_000, signal) {
+export async function boundedJSON(response, limit = maxAnswerBytes, timeout = 10_000, signal, onBytes) {
   if (signal?.aborted || !response.body || response.bodyUsed || response.body.locked ||
       Number(response.headers.get("content-length")) > limit) return;
   const reader = response.clone().body.getReader();
   // Cancellation of the cloned tee may wait for its other branch. Never await it.
   let expired = false;
   const cancel = () => { expired = true; void reader.cancel().catch(() => {}); };
-  const timer = setTimeout(cancel, timeout);
+  const timer = timeout > 0 ? setTimeout(cancel, timeout) : undefined;
   signal?.addEventListener("abort", cancel, { once: true });
   const chunks = [];
   let size = 0;
@@ -59,7 +59,10 @@ export async function boundedJSON(response, limit = maxAnswerBytes, timeout = 10
       if (done) return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size)));
       size += value.byteLength;
       if (size > limit) return;
-      if (value.byteLength) chunks.push(value);
+      if (value.byteLength) {
+        onBytes?.();
+        chunks.push(value);
+      }
     }
   } catch {
     return;

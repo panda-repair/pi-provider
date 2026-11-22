@@ -4,6 +4,28 @@ import { boundedJSON, describeError, maxAnswerBytes, retryWait, unknownOutcome }
 import { pandaEventStream } from "./stream.js";
 import { responseUsage } from "./usage.js";
 
+// Pi uses the largest Node timer for an SDK timeout of zero. Our transport
+// handles the real idle limit while the SDK waits for the entire custom fetch.
+const sdkTimeout = 2_147_483_647;
+
+function idleWatch(timeoutMs, callerSignal) {
+  const controller = new AbortController();
+  const signal = callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal;
+  let timer;
+  function stop() {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", stop);
+  }
+  function reset() {
+    clearTimeout(timer);
+    if (timeoutMs > 0 && !signal.aborted) {
+      timer = setTimeout(() => controller.abort(), Math.min(timeoutMs, sdkTimeout));
+    }
+  }
+  signal.addEventListener("abort", stop, { once: true });
+  return { signal, reset, stop };
+}
+
 function errorMessage(model, failure, aborted) {
   return { role: "assistant", content: [], api: model.api, model: model.id, provider: "panda",
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
@@ -30,11 +52,8 @@ export function pandaStream(stream, assertAvailable, { observe, accounting, canD
     const usage = responseUsage(model);
     const foreground = options.onPayload && options.onResponse && options.onProviderStreamEvent;
     const send = options.fetch ?? globalThis.fetch;
-    const panel = model.id.startsWith("panel:") || ["auto", "auto:quality"].includes(model.id);
-    const timeoutMs = options.timeoutMs ?? (panel ? 600_000 : undefined);
-    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Infinity;
+    const timeoutMs = options.timeoutMs ?? 600_000;
     const retries = options.maxRetries === undefined ? 2 : Math.min(2, Math.max(0, Math.floor(options.maxRetries) || 0));
-    const timeLeft = () => Math.max(1, Math.min(2_147_483_647, Number.isFinite(deadline) ? deadline - Date.now() : 600_000));
 
     function stop(failure) {
       state.failure = failure;
@@ -54,37 +73,52 @@ export function pandaStream(stream, assertAvailable, { observe, accounting, canD
       if (wireModel !== model.id) return stop({ message: "Panda refused a request whose model differs from the selected Auto or Panel." });
       state.key = randomUUID();
       headers.set("Idempotency-Key", state.key);
+      // Keep the SDK's wire hint accurate and preserve an explicitly supplied header.
+      if (headers.get("x-stainless-timeout") === String(Math.trunc(sdkTimeout / 1000)) &&
+          !new Headers(model.headers).has("x-stainless-timeout") && !new Headers(options.headers).has("x-stainless-timeout")) {
+        if (timeoutMs > 0) headers.set("x-stainless-timeout", String(Math.trunc(timeoutMs / 1000)));
+        else headers.delete("x-stainless-timeout");
+      }
       usage.request(init.body);
       const signals = [init.signal, options.signal].filter(Boolean);
       const signal = signals.length ? AbortSignal.any(signals) : undefined;
-      const request = { ...init, headers, redirect: "manual", signal };
+      const request = { ...init, headers, redirect: "manual" };
       let remainingWait = 60_000, prehold;
       for (let attempt = 0; ; attempt++) {
+        const idle = idleWatch(timeoutMs, signal);
+        let streaming = false;
         try {
           signal?.throwIfAborted();
           // Once another POST starts, its outcome is independent of the previous refusal.
           prehold = undefined;
           state.sent = true;
-          const response = await send(input, request);
+          idle.reset();
+          const response = await send(input, { ...request, signal: idle.signal });
+          idle.signal.throwIfAborted();
+          idle.reset();
           if (response.redirected || (response.status >= 300 && response.status < 400) || (response.url && response.url !== target)) {
             void response.body?.cancel().catch(() => {});
             return stop({ message: "Panda refused an unexpected response endpoint or redirect. " + unknownOutcome });
           }
           if (response.ok && response.body && response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
-            return pandaEventStream(response, state, canDisplay,
-              AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeLeft())]), usage);
+            const result = pandaEventStream(response, state, canDisplay, idle, usage);
+            streaming = true;
+            return result;
           }
-          const error = describeError(response.status, await boundedJSON(response, maxAnswerBytes, timeLeft(), signal),
+          const error = describeError(response.status, await boundedJSON(response, maxAnswerBytes, 0, idle.signal, idle.reset),
             response.headers, canDisplay);
+          idle.stop();
           void response.body?.cancel().catch(() => {});
           const wait = retryWait(response.headers.get("retry-after"), attempt);
           const maxWait = Math.min(remainingWait, options.maxRetryDelayMs > 0 ? options.maxRetryDelayMs : Infinity);
-          if (!error.retry || attempt >= retries || wait > maxWait || Date.now() + wait >= deadline) return stop(error);
+          if (!error.retry || attempt >= retries || wait > maxWait || (timeoutMs > 0 && wait >= timeoutMs)) return stop(error);
           prehold = error;
           remainingWait -= wait;
           await delay(wait, undefined, { signal });
         } catch {
           return stop(prehold ?? { message: state.sent ? unknownOutcome : "Panda did not send this request. No charge was incurred." });
+        } finally {
+          if (!streaming) idle.stop();
         }
       }
     }
@@ -127,7 +161,7 @@ export function pandaStream(stream, assertAvailable, { observe, accounting, canD
       catch { state.callbackFailed = true; state.cancelBody?.(); throw new Error("Panda response callback failed."); }
     });
     const native = () => stream(model, context, {
-      ...options, timeoutMs, maxRetries: 0, fetch: dispatch,
+      ...options, timeoutMs: sdkTimeout, maxRetries: 0, fetch: dispatch,
       async onPayload(payload, target) {
         if (foreground) state.foreground = true;
         return options.onPayload?.(payload, target);

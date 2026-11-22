@@ -4,7 +4,7 @@ const encoder = new TextEncoder();
 const finishReasons = new Set(["stop", "length", "tool_calls", "function_call", "content_filter"]);
 class InvalidStream extends Error {}
 
-async function* lines(body, signal) {
+async function* lines(body, signal, onBytes) {
   const reader = body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const cancel = () => { void reader.cancel().catch(() => {}); };
@@ -16,6 +16,7 @@ async function* lines(body, signal) {
       const { done, value } = await reader.read();
       signal?.throwIfAborted();
       if (done) break;
+      if (value.byteLength) onBytes();
       size += value.byteLength;
       if (size > maxAnswerBytes) throw new InvalidStream();
       let text;
@@ -45,9 +46,9 @@ async function* lines(body, signal) {
   }
 }
 
-async function* frames(body, signal) {
+async function* frames(body, signal, onBytes) {
   let data = [], event = "";
-  for await (const line of lines(body, signal)) {
+  for await (const line of lines(body, signal, onBytes)) {
     if (!line) {
       if (data.length || event === "error") yield { data: data.join("\n"), event };
       data = []; event = "";
@@ -57,12 +58,13 @@ async function* frames(body, signal) {
   if (data.length) throw new Error();
 }
 
-export function pandaEventStream(response, state, canDisplay, signal, usage) {
+export function pandaEventStream(response, state, canDisplay, idle, usage) {
   const id = supportId(response.headers);
   if (id) state.supportId = id;
   const consumer = new AbortController();
-  const reading = AbortSignal.any([signal, consumer.signal]);
+  const reading = AbortSignal.any([idle.signal, consumer.signal]);
   state.cancelBody = () => {
+    idle.stop();
     consumer.abort();
     if (!response.body.locked) void response.body.cancel().catch(() => {});
   };
@@ -73,7 +75,7 @@ export function pandaEventStream(response, state, canDisplay, signal, usage) {
         void response.body.cancel().catch(() => {});
         throw new InvalidStream();
       }
-      for await (const frame of frames(response.body, reading)) {
+      for await (const frame of frames(response.body, reading, idle.reset)) {
         if (frame.data === "[DONE]" && frame.event !== "error") {
           if (!state.finish) throw new Error();
           done = true;
@@ -106,6 +108,8 @@ export function pandaEventStream(response, state, canDisplay, signal, usage) {
       // Only losing the optional trailer after a validated finish can end successfully.
       if (error instanceof InvalidStream && state.settled) state.failure ??= { message: "Panda returned a settlement followed by an invalid stream." };
       else if (!state.settled) state.failure ??= { message: unknownOutcome };
+    } finally {
+      idle.stop();
     }
     yield encoder.encode("data: [DONE]\n\n");
   }

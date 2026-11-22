@@ -49,7 +49,7 @@ Published prices are ceilings. Under Panda’s API billing contract, you pay 3/2
 
 Each Pi call opens with its own idempotency key. Panda failures stop that call, including compaction, branch summaries and virtual-model requests. After a dropped connection, incomplete stream or unknown server outcome, the request may have run and been charged. Submitting the prompt again as a new Pi call starts a new run and may charge you again. If Panda has already reported a settled finish, Pi keeps the answer and reported charge even if the optional usage trailer is lost. A content filter ends the call with a refusal and preserves the active history. Pi cannot save that refusal as a compaction or branch summary. A caller cancellation or response callback failure still ends the call and retains any settlement Panda has already supplied.
 
-The adapter retries only Panda’s two pre-admission throttles for concurrency and workspace rate limits. The adapter makes at most two further attempts with the same key and identical request bytes. A lower `maxRetries` applies, including zero. Cancelling while waiting after a confirmed pre-admission throttle reports that the attempt incurred no charge. It honors `Retry-After`, cancellation and the caller’s deadline, with a total wait budget of 60 seconds. A retry veto or a longer required delay stops the call. Pi’s HTTP client can also resend the original key and body after HTTP 421, even with `maxRetries: 0`. If Panda already admitted the request, it can return a 409 replay of the original run without a second charge.
+The adapter retries only Panda’s two pre-admission throttles for concurrency and workspace rate limits. The adapter makes at most two further attempts with the same key and identical request bytes. A lower `maxRetries` applies, including zero. Cancelling while waiting after a confirmed pre-admission throttle reports that the attempt incurred no charge. It honors `Retry-After`, cancellation and the configured idle timeout, with a total wait budget of 60 seconds. A retry veto or a longer required delay stops the call. Pi’s HTTP client can also resend the original key and body after HTTP 421, even with `maxRetries: 0`. If Panda already admitted the request, it can return a 409 replay of the original run without a second charge.
 
 A running receipt means the charge is pending and may be zero. A settled receipt shows the reported charge, including zero. A replay cannot recover the answer. Pi recognizes a charge the session has already saved when the entry retains its run ID. An unsaved standalone result can report the amount again. When a stream cuts early, its validated Panda request ID remains available in the error diagnostic for a billing inquiry. A failed checkpoint or standalone call can report a charge without creating a Pi spending entry. A request that exceeds the input limit stops. You can compact or shorten the conversation and submit it again. Pi can still compact a growing conversation before a call. If that preventive summary fails, Pi can continue the foreground prompt you already submitted.
 
@@ -57,11 +57,7 @@ Custom extensions that save Panda spending in a checkpoint, tool result or expli
 
 ## Panel timeouts
 
-Panels can take several minutes before returning their first response. For a ten-minute deadline, set the following in Pi’s `settings.json`. Pi’s default HTTP idle timeout is five minutes. If you also set `retry.provider.timeoutMs`, it selects the provider deadline independently. Explicit per-call and Pi timeouts are preserved.
-
-```json
-{ "httpIdleTimeoutMs": 600000, "retry": { "provider": { "timeoutMs": 600000 } } }
-```
+Panda sends headers when it admits a streamed request and sends a keepalive every 15 seconds while waiting for an answer. Long Panel runs work with Pi’s default five-minute HTTP idle timeout. The timeout covers the wait for headers, then starts again whenever any response bytes arrive, including a keepalive. Pi’s `retry.provider.timeoutMs` overrides `httpIdleTimeoutMs` for the provider, and a per-call `timeoutMs` takes precedence. When Pi supplies no timeout, all Auto and Panel selectors use ten minutes. An explicit zero disables the adapter’s idle timeout.
 
 ## Custom tool schemas
 

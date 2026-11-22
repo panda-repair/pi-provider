@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getEventListeners } from "node:events";
 import backendGrants from "../src/routing-backend-grants.json" with { type: "json" };
 import { boundedJSON, describeError, maxAnswerBytes, retryWait } from "../src/errors.js";
 import { pandaStream } from "../src/request.js";
@@ -15,6 +16,207 @@ const refusal = (status,code,panda,headers) => Response.json({error:{code,messag
 const sse = data => new Response(data, {headers:{"content-type":"text/event-stream"}});
 const completed = () => sse('data: {"choices":[{"delta":{"content":"yes"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
 const initial = { role:"assistant", content:[], stopReason:"stop", usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{total:0}} };
+
+function virtualExchange(t, timeoutMs, id = "panel:panda", expectedPosts = 1) {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  t.mock.method(AbortSignal, "timeout", ms => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  });
+  let pending = Promise.withResolvers();
+  const retryStarted = Promise.withResolvers();
+  const caller = new AbortController();
+  const wire = { posts: 0, keys: [] };
+  const fetch = (_url, init) => {
+    const headers = pending;
+    wire.posts++;
+    if (wire.posts === 2) retryStarted.resolve();
+    wire.keys.push(init.headers.get("idempotency-key"));
+    wire.hint = init.headers.get("x-stainless-timeout");
+    wire.signal = init.signal;
+    const aborted = () => headers.reject(init.signal.reason);
+    init.signal?.addEventListener("abort", aborted, { once: true });
+    return headers.promise.finally(() => init.signal?.removeEventListener("abort", aborted));
+  };
+  const request = pandaStream((_model, _context, opts) => ({ async result() {
+    // The stock OpenAI SDK times the entire custom fetch, including retries and HTTP error bodies.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 600_000);
+    let response;
+    try {
+      response = await opts.fetch(model.baseUrl + "/chat/completions", {
+        method: "POST", signal: controller.signal, body: JSON.stringify({ model: id }),
+        headers: { authorization: "Bearer fixture", "x-stainless-timeout": String(Math.trunc(opts.timeoutMs / 1000)) },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    wire.forwarded = await response.text();
+    return { ...initial, stopReason: response.ok ? "stop" : "error" };
+  } }), () => {});
+  const result = request({ ...model, id }, {}, { apiKey: "fixture", timeoutMs, signal: caller.signal, fetch }).result();
+  t.after(() => { caller.abort(); assert.equal(wire.posts, expectedPosts); });
+  return {
+    wire, result, retryStarted: retryStarted.promise, abort: () => caller.abort(),
+    headers(status = 200, extra = {}) {
+      const body = new ReadableStream({
+        start(controller) { wire.body = controller; },
+        cancel() { wire.cancelled = true; },
+      }, { highWaterMark: 0 });
+      pending.resolve(new Response(body, { status, headers: {
+        "content-type": status === 200 ? "text/event-stream" : "application/json", ...extra,
+      } }));
+      pending = Promise.withResolvers();
+    },
+    async advance(ms = 0) {
+      t.mock.timers.tick(ms);
+      await new Promise(resolve => setImmediate(resolve));
+    },
+    write(text) { wire.body.enqueue(Buffer.from(text)); },
+    finish() {
+      wire.body.enqueue(Buffer.from('data: {"choices":[{"delta":{"content":"ordinary reply"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'));
+      wire.body.close();
+    },
+  };
+}
+
+test("15-second Panda keepalives carry a six-minute Panel answer past Pi's five-minute idle limit", async t => {
+  const call = virtualExchange(t, 300_000);
+  call.headers();
+  call.write(": panda\n\n");
+  await call.advance();
+  for (let i = 1; i < 24; i++) {
+    await call.advance(15_000);
+    assert.ok(!call.wire.cancelled, "the stream closed at " + i * 15 + " seconds");
+    call.write(": keepalive\n\n");
+    await call.advance();
+  }
+  await call.advance(15_000);
+  call.finish();
+  assert.equal((await call.result).stopReason, "stop");
+  assert.match(call.wire.forwarded, /ordinary reply/);
+  assert.doesNotMatch(call.wire.forwarded, /: panda|: keepalive/);
+  assert.equal(call.wire.hint, "300");
+  await call.advance(600_000);
+  assert.equal(call.wire.signal.aborted, false, "finished calls release their timer");
+  assert.equal(getEventListeners(call.wire.signal, "abort").length, 0);
+});
+
+test("headers and partial SSE lines each restart the idle window, and a silent stream stops", async t => {
+  const call = virtualExchange(t, 300_000);
+  await call.advance(290_000);
+  call.headers();
+  await call.advance();
+  await call.advance(290_000);
+  assert.ok(!call.wire.cancelled);
+  call.write(": keep");
+  await call.advance();
+  await call.advance(290_000);
+  assert.ok(!call.wire.cancelled);
+  call.write("");
+  await call.advance();
+  await call.advance(10_001);
+  assert.equal(call.wire.cancelled, true);
+  const message = await call.result;
+  assert.equal(message.stopReason, "error");
+  assert.match(message.errorMessage, /may have run and been charged/);
+});
+
+test("Auto uses a ten-minute header timeout when the caller supplies none", async t => {
+  const call = virtualExchange(t, undefined, "auto:cost");
+  await call.advance(599_999);
+  assert.ok(!call.wire.signal?.aborted);
+  assert.equal(call.wire.hint, "600");
+  await call.advance(2);
+  assert.equal(call.wire.signal?.aborted, true);
+  assert.match((await call.result).errorMessage, /may have run and been charged/);
+});
+
+test("an explicit longer idle window permits headers past the standalone default", async t => {
+  const call = virtualExchange(t, 650_000);
+  await call.advance(649_999);
+  call.headers();
+  call.finish();
+  assert.equal((await call.result).stopReason, "stop");
+  assert.equal(call.wire.hint, "650");
+});
+
+test("a zero idle timeout permits both a long header wait and silence after admission", async t => {
+  const call = virtualExchange(t, 0);
+  await call.advance(700_000);
+  call.headers();
+  await call.advance();
+  await call.advance(700_000);
+  assert.ok(!call.wire.cancelled);
+  call.finish();
+  assert.equal((await call.result).stopReason, "stop");
+  assert.equal(call.wire.hint, null);
+});
+
+test("caller cancellation after admission still closes a stream with its idle limit disabled", async t => {
+  const call = virtualExchange(t, 0);
+  call.headers();
+  call.write(": panda\n\n");
+  await call.advance();
+  call.abort();
+  const message = await call.result;
+  assert.equal(message.stopReason, "aborted");
+  assert.match(message.errorMessage, /may have run and been charged/);
+  assert.equal(call.wire.cancelled, true);
+  assert.equal(getEventListeners(call.wire.signal, "abort").length, 0);
+});
+
+test("an error after admission and keepalives remains a single terminal receipt without DONE", async t => {
+  const call = virtualExchange(t, 300_000);
+  call.headers();
+  call.write(": panda\n\n");
+  await call.advance();
+  call.write(": keepalive\n\n");
+  const data = { error: { code: "answer_invalid", message: privateText }, panda: receipt("failed", "3") };
+  call.write("event: error\ndata: " + JSON.stringify(data) + "\n\n");
+  const message = await call.result;
+  assert.equal(message.stopReason, "error");
+  assert.equal(message.diagnostics[0].details.code, "answer_invalid");
+  assert.match(message.errorMessage, /US\$0\.03/);
+  assert.doesNotMatch(JSON.stringify(message) + call.wire.forwarded, /DO_NOT_RECORD|: keepalive/);
+  assert.equal(call.wire.cancelled, true);
+});
+
+test("HTTP error receipt bytes keep a slowly arriving settled charge readable", async t => {
+  const call = virtualExchange(t, 300_000);
+  await call.advance(290_000);
+  call.headers(502);
+  const text = JSON.stringify({ error: { code: "answer_invalid" }, panda: receipt("failed", "3") });
+  call.write(text.slice(0, 10));
+  await call.advance();
+  await call.advance(290_000);
+  call.write(text.slice(10));
+  call.wire.body.close();
+  const message = await call.result;
+  assert.equal(message.stopReason, "error");
+  assert.match(message.errorMessage, /US\$0\.03/);
+});
+
+test("a confirmed throttle can retry after a long active body, with the same key and a fresh header wait", async t => {
+  const call = virtualExchange(t, 300_000, "auto:quality", 2);
+  await call.advance(290_000);
+  call.headers(429, { "retry-after": "0" });
+  call.write('{"error":');
+  await call.advance();
+  await call.advance(290_000);
+  call.write('{"code":"throttle_workspace_rate_limited"}}');
+  call.wire.body.close();
+  await call.advance();
+  await call.advance(1);
+  await Promise.race([call.retryStarted, call.result]);
+  assert.equal(call.wire.posts, 2);
+  await call.advance(290_000);
+  call.headers();
+  call.finish();
+  assert.equal((await call.result).stopReason, "stop");
+  assert.equal(new Set(call.wire.keys).size, 1);
+});
 
 function open(target, context, options) {
   const task = (async () => {
@@ -55,7 +257,7 @@ test("only the two authorized throttles internally repeat the identical request 
   }
 });
 
-test("backoff observes delay, cancellation, total deadline and validated Retry-After", async () => {
+test("backoff observes delay, cancellation, the idle limit and validated Retry-After", async () => {
   const allowed=()=>refusal(429,"throttle_workspace_rate_limited",undefined,{"Retry-After":"1"});
   const h=harness([allowed,completed]); const start=Date.now();
   assert.equal((await h.send()).stopReason,"stop"); assert.ok(Date.now()-start >= 950);
@@ -250,7 +452,7 @@ test("every Pi spending-entry type carries Panda provenance through copies and r
   for(let i=0;i<2;i++) assert.equal(account.apply(initial,{...receipt("failed","3"),run_id:undefined,replay:true}).usage.cost.total,.03);
 });
 
-test("the active deadline permits slow receipts and bounds an incomplete error stream", async () => {
+test("the idle timeout permits slow receipts and bounds an incomplete error stream", async () => {
   const text=Buffer.from(JSON.stringify({error:{code:"answer_invalid",message:privateText},panda:receipt("failed","3")}));
   const split=()=>new Response(new ReadableStream({
     async start(controller) {

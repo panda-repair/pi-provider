@@ -3,7 +3,6 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { catalog } from "../src/catalog.js";
 import { responseUsage } from "../src/usage.js";
-import { pandaStream } from "../src/request.js";
 
 const count = (input_tokens,output_tokens) => ({ usage:{ input_tokens,output_tokens,cached_input_tokens:100 } });
 const base = { content:[{type:"text",text:"abcd"}], usage:{input:220000,output:45,cacheRead:5000,cacheWrite:0,
@@ -50,18 +49,6 @@ test("only reported Panel aggregate counters produce spending diagnostics, inclu
     const aggregate=result.diagnostics?.find(item=>item.type==="panda.aggregate_usage")?.details;
     if (counts?.total_tokens===0) assert.deepEqual(aggregate,{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0});
     else assert.equal(aggregate,undefined);
-  }
-});
-
-test("Panel transport honors explicit short and long timeouts and a ten-minute standalone default", async () => {
-  for (const [given,expected] of [[undefined,600000],[15000,15000],[300000,300000],[650000,650000]]) {
-    let timeout;
-    const stream=pandaStream((_m,_c,options)=>{
-      timeout=options.timeoutMs;
-      return {result:async()=>({stopReason:"stop"})};
-    },()=>{});
-    await stream({id:"panel:panda"},{},{timeoutMs:given}).result();
-    assert.equal(timeout,expected);
   }
 });
 
