@@ -107,7 +107,7 @@ jobs:
             result="The compatibility trial did not complete successfully. See the linked run for the failing step."
           fi
           body="$(printf '%s\n\n%s\n\nRun: %s\n' \
-            "Pi $PI_VERSION is the latest release on npm. The package enables its model picker only on the Pi versions it was tested on. On $PI_VERSION, \`/model\` lists Panda models only after \`/login panda\` until a release adds this version." \
+            "Pi $PI_VERSION was npm's latest release when the watch checked. This version is outside the provider's tested picker versions." \
             "$result" \
             "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
           gh issue create --repo "$GITHUB_REPOSITORY" --title "Pi $PI_VERSION released" --body "$body"
