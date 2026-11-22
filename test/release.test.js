@@ -88,6 +88,12 @@ require("node:module").syncBuiltinESMExports();`);
   }
 
   await check("annotated tag still resolves after main has advanced");
+  const directTag = git("rev-parse", "refs/tags/v0.1.1");
+  git("-c", "advice.nestedTag=false", "tag", "-f", "-a", "-m", "Outer approval", "-m", approval,
+    "-m", `object ${sha}\ntype commit`, "v0.1.1", directTag);
+  await check("a correctly approved outer tag must point directly to the commit, even when its message repeats the headers",
+    {}, undefined, /exact reviewed commit/);
+  git("update-ref", "refs/tags/v0.1.1", directTag);
   await check("case-insensitive dispatch digest", { TARBALL_SHA256: "a".repeat(64) });
   await check("uppercase SHA and canonical path with ref", { REVIEWED_SHA: sha.toUpperCase() }, page([{ ...green, path: green.path + "@main" }]));
   for (const [name, overrides, error] of [
