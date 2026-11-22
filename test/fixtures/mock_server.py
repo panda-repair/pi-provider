@@ -287,6 +287,28 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get("stream"):
                     content_type = "text/event-stream"
                     base["object"] = "chat.completion.chunk"
+                    if mode in ("settled-invalid-trailer", "done-invalid-trailer"):
+                        state.recorder.settle(admitted, "completed")
+                        admitted["cents"] = 3
+                        receipt = self.settlement(admitted)
+                        choice = {"index": 0, "delta": {"role": "assistant", "content": "paid answer"}, "finish_reason": "stop"}
+                        if mode == "settled-invalid-trailer":
+                            choice["delta"]["reasoning_content"] = "private-marker-reasoning"
+                        first = ("data: " + compact(dict(base, choices=[choice], panda=receipt)) + "\n\n").encode()
+                        if mode == "done-invalid-trailer":
+                            first += b"data: [DONE]\n\n"
+                        trailer = b'data: {"note":"\xff"}\n\n'
+                        record.update(response_status=200, receipt=receipt, write_bytes=[len(first), len(trailer)])
+                        self.send_response(200)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Length", str(len(first) + len(trailer)))
+                        self.end_headers()
+                        self.wfile.write(first)
+                        self.wfile.flush()
+                        time.sleep(0.035)
+                        self.wfile.write(trailer)
+                        self.wfile.flush()
+                        return
                     if "tool_calls" in delta:
                         delta = {"tool_calls": [dict(index=0, **delta["tool_calls"][0])]}
                     if mode in ("settled-cut", "settled-length", "content-filter", "summary-length", "branch-length"):

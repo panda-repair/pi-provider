@@ -322,11 +322,13 @@ def main():
     modes += ["refused-manual", "refused-branch", "panel-context", "routed-context", "oversized-context", "support-cut",
               "settled-abort", "settled-callback", "large-receipt", "sdk-picker", "paid-compaction", "paid-branch"]
     modes += ["picker-env", "picker-config", "picker-command", "picker-command-auth-rotation"]
+    modes += ["settled-invalid-trailer", "done-invalid-trailer"]
     modes += ["saved-standalone", "saved-custom-manual", "saved-custom-branch", "saved-default-decoy", "saved-explicit",
               "saved-tool", "aggregate-present", "aggregate-zero", "aggregate-missing", "aggregate-null"]
     for mode in modes:
         target = "auto:quality" if mode == "usage" else "panel:panda" if mode == "timeout" else "auto:cost"
-        if mode in ("virtual", "large-failed-turn", "panel-context", "oversized-context", "large-receipt"):
+        if mode in ("virtual", "large-failed-turn", "panel-context", "oversized-context", "large-receipt",
+                    "settled-invalid-trailer", "done-invalid-trailer"):
             target = "panel:panda"
         if mode.startswith(("saved-", "aggregate-")):
             target = "panel:panda"

@@ -64,28 +64,29 @@ function receive(response, idle, consumer) {
 
 async function* lines(chunks) {
   const decoder = new TextDecoder("utf-8", { fatal: true });
-  let fragments = [], afterCR = false;
-  for await (const value of chunks) {
-    let text;
-    try { text = decoder.decode(value, { stream: true }); } catch { throw new InvalidStream(); }
-    if (!text) continue;
-    let start = afterCR && text[0] === "\n" ? 1 : 0;
+  function decode(bytes, stream) {
+    try { return decoder.decode(bytes, { stream }); } catch { throw new InvalidStream(); }
+  }
+  const lf = 0x0a, cr = 0x0d;
+  let line = "", afterCR = false;
+  for await (const bytes of chunks) {
+    let start = afterCR && bytes[0] === lf ? 1 : 0;
     afterCR = false;
-    for (let i = start; i < text.length; i++) {
-      if (text[i] !== "\n" && text[i] !== "\r") continue;
-      fragments.push(text.slice(start, i));
-      yield fragments.join("");
-      fragments = [];
-      if (text[i] === "\r") {
-        if (i + 1 === text.length) afterCR = true;
-        else if (text[i + 1] === "\n") i++;
+    for (let i = start; i < bytes.length; i++) {
+      if (bytes[i] !== lf && bytes[i] !== cr) continue;
+      // Decode through this delimiter only. A later invalid byte must not erase a complete frame.
+      yield line + decode(bytes.subarray(start, i + 1), true).slice(0, -1);
+      line = "";
+      if (bytes[i] === cr) {
+        if (i + 1 === bytes.length) afterCR = true;
+        else if (bytes[i + 1] === lf) i++;
       }
       start = i + 1;
     }
-    if (start < text.length) fragments.push(text.slice(start));
+    if (start < bytes.length) line += decode(bytes.subarray(start), true);
   }
-  decoder.decode();
-  if (fragments.length) throw new Error();
+  decode(undefined, false);
+  if (line) throw new Error();
 }
 
 async function* frames(chunks) {
@@ -142,8 +143,9 @@ export function pandaEventStream(response, state, canDisplay, idle, usage) {
       if ((!state.finish || (!done && !state.settled)) && !state.failure) throw new Error();
     } catch (error) {
       // Only losing the optional trailer after a validated finish can end successfully.
-      if (error instanceof InvalidStream && state.settled) state.failure ??= { message: "Panda returned a settlement followed by an invalid stream." };
-      else if (!state.settled) state.failure ??= { message: unknownOutcome };
+      if (error instanceof InvalidStream && state.settled) {
+        state.failure ??= { invalidTrailer: true, message: "Panda returned a settlement followed by an invalid stream." };
+      } else if (!state.settled) state.failure ??= { message: unknownOutcome };
     } finally {
       state.cancelBody();
     }

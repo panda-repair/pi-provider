@@ -55,14 +55,17 @@ function virtualExchange(t, timeoutMs, id = "panel:panda", expectedPosts = 1, ho
     // Pi awaits its response hook before opening the SSE iterator and each event hook before advancing it.
     await opts.onResponse?.({ status: response.status, headers: response.headers }, _model);
     wire.forwarded = "";
+    let text = "";
     for await (const bytes of response.body) {
       const frame = Buffer.from(bytes).toString();
       wire.forwarded += frame;
-      if (response.ok && opts.onProviderStreamEvent && frame !== "data: [DONE]\n\n") {
-        await opts.onProviderStreamEvent(JSON.parse(frame.slice(6)), _model);
+      if (response.ok && frame !== "data: [DONE]\n\n") {
+        const chunk = JSON.parse(frame.slice(6));
+        await opts.onProviderStreamEvent?.(chunk, _model);
+        text += chunk.choices[0]?.delta?.content ?? "";
       }
     }
-    return { ...initial, stopReason: response.ok ? "stop" : "error" };
+    return { ...initial, content: text ? [{ type: "text", text }] : [], stopReason: response.ok ? "stop" : "error" };
   } }), () => {}, { accounting: settlementAccounting() });
   const result = request({ ...model, id }, {}, { apiKey: "fixture", timeoutMs, signal: caller.signal, fetch, ...hooks }).result();
   t.after(() => { caller.abort(); assert.equal(wire.posts, expectedPosts); });
@@ -135,6 +138,99 @@ test("a slow response hook preserves active bytes and a settlement received befo
   assert.equal(message.usage.cost.total, .03);
   assert.match(call.wire.forwarded, /ordinary reply/);
   assert.doesNotMatch(call.wire.forwarded, /keepalive/);
+});
+
+const paidFrame = (content, reason = "stop", panda = receipt("completed", "3")) => "data: " + JSON.stringify({
+  choices: [{ delta: { content }, finish_reason: reason }], panda,
+});
+const invalidTrailer = Buffer.concat([Buffer.from("data: "), Buffer.from([0xff]), Buffer.from("\n\n")]);
+
+for (const done of [false, true]) {
+  test("a buffered paid frame " + (done ? "with" : "without") + " DONE survives an invalid trailer", async t => {
+    const hook = Promise.withResolvers(), seen = [];
+    const call = virtualExchange(t, 2200, "panel:panda", 1, {
+      onResponse: () => hook.promise,
+      onProviderStreamEvent: chunk => seen.push(chunk.panda?.run_id),
+    });
+    call.headers();
+    call.write(paidFrame("paid answer") + "\r\n\r\n" + (done ? "data: [DONE]\r\n\r\n" : ""));
+    await call.advance(90);
+    call.write(invalidTrailer);
+    call.wire.body.close();
+    await call.advance(230);
+    hook.resolve();
+    const message = await call.result;
+    assert.deepEqual(seen, [runId]);
+    assert.deepEqual(message.content, [{ type: "text", text: "paid answer" }]);
+    assert.deepEqual(message.usage.cost.pandaRunIds, [runId]);
+    assert.equal(message.usage.cost.total, .03);
+    assert.equal(message.stopReason, done ? "stop" : "error");
+    if (done) assert.equal(message.errorMessage, undefined);
+    else assert.match(message.errorMessage, /settlement followed by an invalid stream/);
+  });
+}
+
+test("fragmented UTF-8 and CR/LF boundaries preserve text and strip only the initial BOM", async t => {
+  const call = virtualExchange(t, 100);
+  call.headers();
+  const bytes = Buffer.from("\uFEFFdata: {\"choices\":[{\"delta\":{\"content\":\"🌱\"}}]}\r\n\r\n" +
+    "\uFEFF" + paidFrame(privateText) + "\r\r" + paidFrame("résumé") + "\n\ndata: [DONE]\r\r");
+  for (const byte of bytes) {
+    call.write([byte]);
+    await call.advance();
+  }
+  assert.deepEqual((await call.result).content, [{ type: "text", text: "🌱résumé" }]);
+});
+
+test("an incomplete UTF-8 sequence at EOF after settlement is an invalid trailer", async t => {
+  const call = virtualExchange(t, 100);
+  call.headers();
+  call.write(Buffer.concat([Buffer.from(paidFrame("paid answer") + "\n\ndata: "), Buffer.from([0xf0, 0x9f])]));
+  call.wire.body.close();
+  const message = await call.result;
+  assert.equal(message.stopReason, "error");
+  assert.match(message.errorMessage, /settlement followed by an invalid stream/);
+  assert.deepEqual(message.content, [{ type: "text", text: "paid answer" }]);
+  assert.equal(message.usage.cost.total, .03);
+});
+
+for (const reason of [null, "content_filter", "tool_calls"]) {
+  test("invalid bytes do not restore text from a " + (reason ?? "nonterminal") + " frame", async t => {
+    const call = virtualExchange(t, 100);
+    call.headers();
+    call.write(Buffer.concat([Buffer.from(paidFrame(privateText, reason) + "\n\n"), invalidTrailer]));
+    call.wire.body.close();
+    const message = await call.result;
+    assert.equal(message.stopReason, "error");
+    assert.deepEqual(message.content, []);
+    assert.doesNotMatch(JSON.stringify(message), /DO_NOT_RECORD/);
+    if (reason === "content_filter") assert.equal(message.rawStopReason, reason);
+  });
+}
+
+test("an unpriced finish and an invalid trailer do not restore unconfirmed answer text", async t => {
+  const call = virtualExchange(t, 100);
+  call.headers();
+  call.write(Buffer.concat([Buffer.from(paidFrame(privateText, "stop", receipt("completed", null)) + "\n\n"), invalidTrailer]));
+  call.wire.body.close();
+  const message = await call.result;
+  assert.equal(message.stopReason, "error");
+  assert.deepEqual(message.content, []);
+  assert.equal(message.usage.cost.total, 0);
+});
+
+test("a structured stream error keeps its own sanitized outcome after a paid frame", async t => {
+  const call = virtualExchange(t, 100);
+  call.headers();
+  const error = { error: { code: "answer_invalid", message: privateText }, panda: receipt("failed", "3") };
+  call.write(paidFrame("earlier text") + "\n\nevent: error\ndata: " + JSON.stringify(error) + "\n\n");
+  call.wire.body.close();
+  const message = await call.result;
+  assert.deepEqual(message.content, []);
+  assert.equal(message.stopReason, "error");
+  assert.equal(message.diagnostics[0].details.code, "answer_invalid");
+  assert.equal(message.usage.cost.total, .03);
+  assert.doesNotMatch(JSON.stringify(message), /DO_NOT_RECORD/);
 });
 
 test("short successive event hooks preserve ordered frames while later bytes and EOF arrive", async t => {

@@ -144,6 +144,33 @@ if (["summary", "branch", "summary-length", "branch-length"].includes(mode)) {
   if (mode==="aggregate-present") assert.equal(aggregate.details.totalTokens,3024);
   else if (mode==="aggregate-zero") assert.equal(aggregate.details.totalTokens,0);
   else assert.equal(aggregate,undefined);
+} else if (mode === "settled-invalid-trailer" || mode === "done-invalid-trailer") {
+  let meter;
+  const received = [];
+  const result = await stream(model, { messages: [user] }, {
+    ...options,
+    async fetch(...args) {
+      const response = await globalThis.fetch(...args);
+      const length = Number(response.headers.get("content-length"));
+      meter = response.clone().arrayBuffer().then(body => assert.equal(body.byteLength, length));
+      return response;
+    },
+    // The wire is complete before the native SDK starts consuming the body.
+    onResponse: () => meter,
+    onProviderStreamEvent: chunk => received.push(chunk.panda?.run_id),
+  }).result();
+  assert.equal(received.length, 1);
+  assert.match(received[0], /^run-[0-9a-f]{32}$/);
+  assert.deepEqual(result.usage.cost.pandaRunIds, received);
+  assert.equal(result.usage.cost.total, .03);
+  assert.deepEqual(result.content.map(block => [block.type, block.text]), [["text", "paid answer"]]);
+  if (mode === "done-invalid-trailer") {
+    assert.equal(result.stopReason, "stop");
+    assert.equal(result.errorMessage, undefined);
+  } else {
+    assert.equal(result.stopReason, "error");
+    assert.match(result.errorMessage, /settlement followed by an invalid stream/);
+  }
 } else if (["usage", "timeout", "malformed", "stream-error", "settled-cut", "content-filter",
     "support-cut", "settled-abort", "settled-callback", "large-receipt"].includes(mode)) {
   const controller=new AbortController(); let responseHeaders;

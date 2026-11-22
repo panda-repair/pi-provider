@@ -140,6 +140,11 @@ export function pandaStream(stream, assertAvailable, { observe, accounting, canD
         const details = { ...failure.details, ...(state.supportId && { requestId: state.supportId }), ...(settled && { panda: settled }) };
         if (Object.keys(details).length) failure = { ...failure, details };
         const message = errorMessage(model, failure, aborted);
+        if (failure.invalidTrailer && state.finish === "stop" && settled?.status === "completed" && settled.run_id && settled.charge &&
+            original.stopReason === "stop" && !aborted && !state.callbackFailed) {
+          message.content = original.content.filter(block => block.type === "text" && typeof block.text === "string")
+            .map(({ text }) => ({ type: "text", text }));
+        }
         if (state.finish === "content_filter") message.rawStopReason = "content_filter";
         return accounting?.apply(message, settled, options) ?? message;
       }
