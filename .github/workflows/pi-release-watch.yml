@@ -2,21 +2,28 @@ name: Pi release watch
 
 # Once a day, check whether Pi's latest release is one the package has been tested on.
 # For a new release, try the package on it and open one issue per version with the result.
+# GitHub disables schedules in public repositories after 60 days without activity: check
+# this workflow monthly, and restore it with `gh workflow enable pi-release-watch.yml`.
 on:
   schedule:
     - cron: "23 7 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: read
-  issues: write
+permissions: {}
 
 concurrency:
   group: pi-release-watch
 
 jobs:
-  watch:
-    runs-on: macos-latest
+  discover:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      version: ${{ steps.pi.outputs.version }}
+      new: ${{ steps.pi.outputs.new }}
+      exists: ${{ steps.issue.outputs.exists }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,7 +41,8 @@ jobs:
             exit 1
           fi
           echo "version=$latest" >> "$GITHUB_OUTPUT"
-          if node scripts/pi-gate.mjs has "$latest"; then
+          tested="$(node scripts/pi-gate.mjs list)"
+          if [[ " $tested " == *" $latest "* ]]; then
             echo "Pi $latest is already tested."
             echo "new=false" >> "$GITHUB_OUTPUT"
           else
@@ -48,37 +56,55 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PI_VERSION: ${{ steps.pi.outputs.version }}
         run: |
-          count="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "in:title \"Pi $PI_VERSION released\"" --json number --jq length)"
-          if [ "$count" -gt 0 ]; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+          set -o pipefail
+          exists="$(gh api --method GET --paginate "repos/$GITHUB_REPOSITORY/issues" \
+            -f state=all -f 'creator=github-actions[bot]' -F per_page=100 |
+            jq -s --arg title "Pi $PI_VERSION released" 'any(.[][]; (has("pull_request") | not) and .title == $title)')"
+          printf 'exists=%s\n' "$exists" >> "$GITHUB_OUTPUT"
 
+  trial:
+    needs: discover
+    if: needs.discover.outputs.new == 'true' && needs.discover.outputs.exists == 'false'
+    # This job installs and runs an unreviewed Pi release, so it gets read access only.
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        if: steps.pi.outputs.new == 'true' && steps.issue.outputs.exists == 'false'
         with:
           python-version: "3.12"
-
       - name: Try the package on the new Pi
-        if: steps.pi.outputs.new == 'true' && steps.issue.outputs.exists == 'false'
-        id: trial
-        continue-on-error: true
         env:
-          PI_VERSION: ${{ steps.pi.outputs.version }}
+          PI_VERSION: ${{ needs.discover.outputs.version }}
         run: |
           npm install --global --prefix "$RUNNER_TEMP/pi" "@earendil-works/pi-coding-agent@$PI_VERSION"
           node scripts/pi-gate.mjs add "$PI_VERSION"
           npm test
           python3 test/e2e.py --pi "$RUNNER_TEMP/pi/bin/pi" --output "$RUNNER_TEMP/e2e"
 
+  report:
+    needs: [discover, trial]
+    if: ${{ !cancelled() && needs.discover.result == 'success' && needs.discover.outputs.new == 'true' && needs.discover.outputs.exists == 'false' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
       - name: Open an issue
-        if: steps.pi.outputs.new == 'true' && steps.issue.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          PI_VERSION: ${{ steps.pi.outputs.version }}
-          OUTCOME: ${{ steps.trial.outcome }}
+          PI_VERSION: ${{ needs.discover.outputs.version }}
+          RESULT: ${{ needs.trial.result }}
         run: |
-          if [ "$OUTCOME" = success ]; then
+          if [ "$RESULT" = success ]; then
             result="With $PI_VERSION added to the version gate, the unit tests and the end-to-end scenarios passed."
           else
-            result="With $PI_VERSION added to the version gate, the unit tests or the end-to-end scenarios failed."
+            result="The compatibility trial did not complete successfully. See the linked run for the failing step."
           fi
           body="$(printf '%s\n\n%s\n\nRun: %s\n' \
             "Pi $PI_VERSION is the latest release on npm. The package enables its model picker only on the Pi versions it was tested on. On $PI_VERSION, \`/model\` lists Panda models only after \`/login panda\` until a release adds this version." \

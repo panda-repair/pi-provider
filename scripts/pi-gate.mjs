@@ -1,4 +1,4 @@
-// Lists, checks or extends the Pi versions that the package enables its picker on.
+// Lists or extends the Pi versions that the package enables its picker on.
 // "add" changes index.js and test/e2e.py in place so CI can try a new Pi release.
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -13,8 +13,6 @@ const verified = JSON.parse(match[1]);
 
 if (command === "list") {
   console.log(verified.join(" "));
-} else if (command === "has") {
-  process.exit(verified.includes(version) ? 0 : 1);
 } else if (command === "add") {
   if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) throw new Error(`Not a release version: ${version}`);
   if (verified.includes(version)) throw new Error(`Pi ${version} is already verified.`);
@@ -24,5 +22,5 @@ if (command === "list") {
   writeFileSync("index.js", index.replace(gate, `verifiedPickerHost = ${JSON.stringify(next).replaceAll(",", ", ")}.includes(VERSION)`));
   writeFileSync("test/e2e.py", e2e.replace(assertion, `assert version in (${next.map(v => JSON.stringify(v)).join(", ")}), version`));
 } else {
-  throw new Error("Usage: node scripts/pi-gate.mjs list | has <version> | add <version>");
+  throw new Error("Usage: node scripts/pi-gate.mjs list | add <version>");
 }

@@ -190,7 +190,9 @@ def main():
                             models_file.write_text(json.dumps({"providers": {"panda": {**override, **attrs}}}))
                             result_id = f"{label}-retired-{index}-{int(supplied)}"
                             offered = run(["--list-models", "panda"], result_id + "-list")
-                            assert hidden not in picker_ids(offered.stdout)
+                            # A cache-only list can show a models.json entry (README); sending it must still fail.
+                            if not supplied:
+                                assert hidden not in picker_ids(offered.stdout)
                             run(["-p", "--no-session", "--model", "panda/" + hidden, "Hello"], result_id, expect=1)
                     assert server.recorder.next_id == count
                     override["apiKey"] = "$PANDA_FIXTURE_CUSTOM_TOKEN"
