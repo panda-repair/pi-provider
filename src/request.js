@@ -23,7 +23,7 @@ function idleWatch(timeoutMs, callerSignal) {
     }
   }
   signal.addEventListener("abort", stop, { once: true });
-  return { signal, reset, stop };
+  return { signal, callerSignal, reset, stop };
 }
 
 function errorMessage(model, failure, aborted) {

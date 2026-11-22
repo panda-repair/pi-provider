@@ -57,7 +57,9 @@ Custom extensions that save Panda spending in a checkpoint, tool result or expli
 
 ## Panel timeouts
 
-Panda sends headers when it admits a streamed request and sends a keepalive every 15 seconds while waiting for an answer. Long Panel runs work with Pi’s default five-minute HTTP idle timeout. The timeout covers the wait for headers, then starts again whenever any response bytes arrive, including a keepalive. Pi’s `retry.provider.timeoutMs` overrides `httpIdleTimeoutMs` for the provider, and a per-call `timeoutMs` takes precedence. When Pi supplies no timeout, all Auto and Panel selectors use ten minutes. An explicit zero disables the adapter’s idle timeout.
+Panda sends headers when it admits a streamed request and sends a keepalive every 15 seconds while waiting for an answer. Long Panel runs work with Pi’s default five-minute HTTP idle timeout. The adapter times the wait for headers, resets its timer whenever response bytes arrive and stops it at the end of the response, even while a Pi hook is processing an earlier event.
+
+Pi chooses the adapter’s timeout from the per-call `timeoutMs`, then `retry.provider.timeoutMs`, then its global `httpIdleTimeoutMs` setting. When Pi supplies no timeout, all Auto and Panel selectors use ten minutes. An explicit per-call or provider value of zero disables the adapter’s timer. Pi’s HTTP client also enforces its global idle timeout on the socket and can close a silent connection sooner.
 
 ## Custom tool schemas
 

@@ -4,51 +4,93 @@ const encoder = new TextEncoder();
 const finishReasons = new Set(["stop", "length", "tool_calls", "function_call", "content_filter"]);
 class InvalidStream extends Error {}
 
-async function* lines(body, signal, onBytes) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+// Read the transport independently of Pi's asynchronous response and event hooks.
+// A single growable byte buffer also bounds the backlog for many tiny chunks.
+function receive(response, idle, consumer) {
+  const reader = response.body.getReader();
+  const signal = AbortSignal.any([idle.signal, consumer.signal]);
   const cancel = () => { void reader.cancel().catch(() => {}); };
-  signal?.addEventListener("abort", cancel, { once: true });
-  let fragments = [], size = 0, afterCR = false;
-  try {
-    for (;;) {
-      signal?.throwIfAborted();
-      const { done, value } = await reader.read();
-      signal?.throwIfAborted();
-      if (done) break;
-      if (value.byteLength) onBytes();
-      size += value.byteLength;
-      if (size > maxAnswerBytes) throw new InvalidStream();
-      let text;
-      try { text = decoder.decode(value, { stream: true }); } catch { throw new InvalidStream(); }
-      if (!text) continue;
-      let start = afterCR && text[0] === "\n" ? 1 : 0;
-      afterCR = false;
-      for (let i = start; i < text.length; i++) {
-        if (text[i] !== "\n" && text[i] !== "\r") continue;
-        fragments.push(text.slice(start, i));
-        yield fragments.join("");
-        fragments = [];
-        if (text[i] === "\r") {
-          if (i + 1 === text.length) afterCR = true;
-          else if (text[i + 1] === "\n") i++;
-        }
-        start = i + 1;
+  signal.addEventListener("abort", cancel, { once: true });
+  const buffer = new ArrayBuffer(0, { maxByteLength: maxAnswerBytes });
+  const bytes = new Uint8Array(buffer);
+  let received = 0, ended = false, failure, wake;
+
+  void (async () => {
+    try {
+      if (Number(response.headers.get("content-length")) > maxAnswerBytes) throw new InvalidStream();
+      for (;;) {
+        signal.throwIfAborted();
+        const { done, value } = await reader.read();
+        signal.throwIfAborted();
+        if (done) break;
+        if (!value.byteLength) continue;
+        const end = received + value.byteLength;
+        if (end > maxAnswerBytes) throw new InvalidStream();
+        idle.reset();
+        if (end > bytes.length) buffer.resize(Math.min(maxAnswerBytes, Math.max(end, bytes.length * 2, 4096)));
+        bytes.set(value, received);
+        received = end;
+        wake?.();
       }
-      if (start < text.length) fragments.push(text.slice(start));
+    } catch (error) {
+      failure = error;
+    } finally {
+      idle.stop();
+      signal.removeEventListener("abort", cancel);
+      cancel();
+      reader.releaseLock();
+      ended = true;
+      wake?.();
     }
-    decoder.decode();
-    if (fragments.length) throw new Error();
-  } finally {
-    signal?.removeEventListener("abort", cancel);
-    cancel();
-    reader.releaseLock();
-  }
+  })();
+
+  return (async function* () {
+    let offset = 0;
+    for (;;) {
+      if (offset < received) {
+        const chunk = bytes.subarray(offset, received);
+        offset = received;
+        yield chunk;
+      } else if (ended) {
+        if (failure) throw failure;
+        return;
+      } else {
+        await new Promise(resolve => { wake = resolve; });
+        wake = undefined;
+      }
+    }
+  })();
 }
 
-async function* frames(body, signal, onBytes) {
+async function* lines(chunks) {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let fragments = [], afterCR = false;
+  for await (const value of chunks) {
+    let text;
+    try { text = decoder.decode(value, { stream: true }); } catch { throw new InvalidStream(); }
+    if (!text) continue;
+    let start = afterCR && text[0] === "\n" ? 1 : 0;
+    afterCR = false;
+    for (let i = start; i < text.length; i++) {
+      if (text[i] !== "\n" && text[i] !== "\r") continue;
+      fragments.push(text.slice(start, i));
+      yield fragments.join("");
+      fragments = [];
+      if (text[i] === "\r") {
+        if (i + 1 === text.length) afterCR = true;
+        else if (text[i + 1] === "\n") i++;
+      }
+      start = i + 1;
+    }
+    if (start < text.length) fragments.push(text.slice(start));
+  }
+  decoder.decode();
+  if (fragments.length) throw new Error();
+}
+
+async function* frames(chunks) {
   let data = [], event = "";
-  for await (const line of lines(body, signal, onBytes)) {
+  for await (const line of lines(chunks)) {
     if (!line) {
       if (data.length || event === "error") yield { data: data.join("\n"), event };
       data = []; event = "";
@@ -62,20 +104,14 @@ export function pandaEventStream(response, state, canDisplay, idle, usage) {
   const id = supportId(response.headers);
   if (id) state.supportId = id;
   const consumer = new AbortController();
-  const reading = AbortSignal.any([idle.signal, consumer.signal]);
-  state.cancelBody = () => {
-    idle.stop();
-    consumer.abort();
-    if (!response.body.locked) void response.body.cancel().catch(() => {});
-  };
+  state.cancelBody = () => consumer.abort();
+  const chunks = receive(response, idle, consumer);
   async function* read() {
     let done = false;
     try {
-      if (Number(response.headers.get("content-length")) > maxAnswerBytes) {
-        void response.body.cancel().catch(() => {});
-        throw new InvalidStream();
-      }
-      for await (const frame of frames(response.body, reading, idle.reset)) {
+      for await (const frame of frames(chunks)) {
+        consumer.signal.throwIfAborted();
+        idle.callerSignal?.throwIfAborted();
         if (frame.data === "[DONE]" && frame.event !== "error") {
           if (!state.finish) throw new Error();
           done = true;
@@ -109,7 +145,7 @@ export function pandaEventStream(response, state, canDisplay, idle, usage) {
       if (error instanceof InvalidStream && state.settled) state.failure ??= { message: "Panda returned a settlement followed by an invalid stream." };
       else if (!state.settled) state.failure ??= { message: unknownOutcome };
     } finally {
-      idle.stop();
+      state.cancelBody();
     }
     yield encoder.encode("data: [DONE]\n\n");
   }

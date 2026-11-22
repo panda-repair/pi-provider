@@ -17,7 +17,7 @@ const sse = data => new Response(data, {headers:{"content-type":"text/event-stre
 const completed = () => sse('data: {"choices":[{"delta":{"content":"yes"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
 const initial = { role:"assistant", content:[], stopReason:"stop", usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{total:0}} };
 
-function virtualExchange(t, timeoutMs, id = "panel:panda", expectedPosts = 1) {
+function virtualExchange(t, timeoutMs, id = "panel:panda", expectedPosts = 1, hooks = {}) {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
   t.mock.method(AbortSignal, "timeout", ms => {
     const controller = new AbortController();
@@ -52,10 +52,19 @@ function virtualExchange(t, timeoutMs, id = "panel:panda", expectedPosts = 1) {
     } finally {
       clearTimeout(timer);
     }
-    wire.forwarded = await response.text();
+    // Pi awaits its response hook before opening the SSE iterator and each event hook before advancing it.
+    await opts.onResponse?.({ status: response.status, headers: response.headers }, _model);
+    wire.forwarded = "";
+    for await (const bytes of response.body) {
+      const frame = Buffer.from(bytes).toString();
+      wire.forwarded += frame;
+      if (response.ok && opts.onProviderStreamEvent && frame !== "data: [DONE]\n\n") {
+        await opts.onProviderStreamEvent(JSON.parse(frame.slice(6)), _model);
+      }
+    }
     return { ...initial, stopReason: response.ok ? "stop" : "error" };
-  } }), () => {});
-  const result = request({ ...model, id }, {}, { apiKey: "fixture", timeoutMs, signal: caller.signal, fetch }).result();
+  } }), () => {}, { accounting: settlementAccounting() });
+  const result = request({ ...model, id }, {}, { apiKey: "fixture", timeoutMs, signal: caller.signal, fetch, ...hooks }).result();
   t.after(() => { caller.abort(); assert.equal(wire.posts, expectedPosts); });
   return {
     wire, result, retryStarted: retryStarted.promise, abort: () => caller.abort(),
@@ -74,8 +83,9 @@ function virtualExchange(t, timeoutMs, id = "panel:panda", expectedPosts = 1) {
       await new Promise(resolve => setImmediate(resolve));
     },
     write(text) { wire.body.enqueue(Buffer.from(text)); },
-    finish() {
-      wire.body.enqueue(Buffer.from('data: {"choices":[{"delta":{"content":"ordinary reply"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'));
+    finish(panda) {
+      const finish = { choices: [{ delta: { content: "ordinary reply" }, finish_reason: "stop" }], panda };
+      wire.body.enqueue(Buffer.from("data: " + JSON.stringify(finish) + "\n\ndata: [DONE]\n\n"));
       wire.body.close();
     },
   };
@@ -101,6 +111,104 @@ test("15-second Panda keepalives carry a six-minute Panel answer past Pi's five-
   await call.advance(600_000);
   assert.equal(call.wire.signal.aborted, false, "finished calls release their timer");
   assert.equal(getEventListeners(call.wire.signal, "abort").length, 0);
+});
+
+test("a slow response hook preserves active bytes and a settlement received before it returns", async t => {
+  const hook = Promise.withResolvers();
+  const call = virtualExchange(t, 240, "panel:panda", 1, { onResponse: () => hook.promise });
+  call.headers();
+  call.write(": panda\n\n");
+  await call.advance();
+  for (let i = 0; i < 3; i++) {
+    await call.advance(100);
+    assert.equal(call.wire.signal.aborted, false);
+    call.write(": keepalive\n\n");
+    await call.advance();
+  }
+  call.finish(receipt("completed", "3"));
+  await call.advance();
+  await call.advance(520);
+  assert.equal(call.wire.signal.aborted, false, "EOF stops the network deadline even before the first downstream read");
+  hook.resolve();
+  const message = await call.result;
+  assert.equal(message.stopReason, "stop");
+  assert.equal(message.usage.cost.total, .03);
+  assert.match(call.wire.forwarded, /ordinary reply/);
+  assert.doesNotMatch(call.wire.forwarded, /keepalive/);
+});
+
+test("short successive event hooks preserve ordered frames while later bytes and EOF arrive", async t => {
+  const seen = [];
+  const call = virtualExchange(t, 100, "auto", 1, { async onProviderStreamEvent(chunk) {
+    seen.push(chunk.choices[0].delta.content);
+    await new Promise(resolve => setTimeout(resolve, 23));
+  } });
+  const words = Array.from({ length: 12 }, (_, i) => String(i));
+  call.headers();
+  call.write(words.map(content => "data: " + JSON.stringify({ choices: [{ delta: { content } }] }) + "\n\n").join(""));
+  await call.advance();
+  for (let i = 1; i <= words.length + 1; i++) {
+    await call.advance(23);
+    if (i === 3) call.write(": keepalive\n\n");
+    if (i === 6) call.finish(receipt("completed", "2"));
+    await call.advance();
+  }
+  const message = await call.result;
+  assert.deepEqual(seen, [...words, "ordinary reply"]);
+  assert.equal(message.stopReason, "stop");
+  assert.equal(message.usage.cost.total, .02);
+});
+
+for (const cause of ["silence", "caller abort", "oversized body"]) {
+  test("a pending response hook releases the network reader on " + cause, async t => {
+    const hook = Promise.withResolvers();
+    const call = virtualExchange(t, 240, "panel:panda", 1, { onResponse: () => hook.promise });
+    call.headers();
+    call.write(": panda\n\n");
+    await call.advance();
+    if (cause === "silence") await call.advance(241);
+    if (cause === "caller abort") call.abort();
+    if (cause === "oversized body") call.write("x".repeat(maxAnswerBytes));
+    await call.advance();
+    assert.equal(call.wire.cancelled, true, "the upstream reader closed before the hook returned");
+    hook.resolve();
+    const message = await call.result;
+    assert.equal(message.stopReason, cause === "caller abort" ? "aborted" : "error");
+    assert.match(message.errorMessage, /may have run and been charged/);
+    assert.equal(getEventListeners(call.wire.signal, "abort").length, 0);
+  });
+}
+
+test("a delayed hook can still read a terminal receipt received before a socket stall", async t => {
+  const hook = Promise.withResolvers();
+  const call = virtualExchange(t, 240, "panel:panda", 1, { onResponse: () => hook.promise });
+  call.headers();
+  const data = { error: { code: "answer_invalid", message: privateText }, panda: receipt("failed", "3") };
+  call.write("data: " + JSON.stringify(data) + "\n\n");
+  await call.advance();
+  await call.advance(241);
+  assert.equal(call.wire.cancelled, true);
+  hook.resolve();
+  const message = await call.result;
+  assert.equal(message.stopReason, "error");
+  assert.equal(message.diagnostics[0].details.code, "answer_invalid");
+  assert.equal(message.usage.cost.total, .03);
+  assert.doesNotMatch(call.wire.forwarded, /DO_NOT_RECORD/);
+});
+
+test("EOF without a finish still reports an unknown outcome after a slow response hook", async t => {
+  const hook = Promise.withResolvers();
+  const call = virtualExchange(t, 240, "panel:panda", 1, { onResponse: () => hook.promise });
+  call.headers();
+  call.write('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n');
+  call.wire.body.close();
+  await call.advance();
+  await call.advance(520);
+  assert.equal(call.wire.signal.aborted, false);
+  hook.resolve();
+  const message = await call.result;
+  assert.equal(message.stopReason, "error");
+  assert.match(message.errorMessage, /may have run and been charged/);
 });
 
 test("headers and partial SSE lines each restart the idle window, and a silent stream stops", async t => {
