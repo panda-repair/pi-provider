@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - run: npm test
+
+  e2e:
+    # test/e2e.py restricts Pi to loopback with macOS sandbox-exec.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pi: ["1.5.2", "1.6.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install stock Pi ${{ matrix.pi }}
+        run: npm install --global --prefix "$RUNNER_TEMP/pi" "@earendil-works/pi-coding-agent@${{ matrix.pi }}"
+      - name: End-to-end scenarios
+        run: python3 test/e2e.py --pi "$RUNNER_TEMP/pi/bin/pi" --output "$RUNNER_TEMP/e2e"
