@@ -224,7 +224,7 @@ test("router IDs require a listed coding route and the router's own grant", () =
   assert.equal(new Set(backendGrants).size, 2);
   assert.ok(backendGrants.every(id => typeof id === "string" && !ids.includes(id)));
   const get = ids => permittedModels(ids.map(id => ({ id })), baseUrl).map(row => row.id);
-  assert.deepEqual(get([...routers, "gemma-4-26b", "panel:panda-quality"]), ["panel:panda-quality"]);
+  assert.deepEqual(get([...routers, "untooled-text-model", "panel:panda-quality"]), ["panel:panda-quality"]);
   assert.deepEqual(get(backendGrants), []);
   for (const id of [...backendGrants, "panel:panda"]) {
     for (const router of routers) assert.equal(get([router, id]).includes(router), id !== "panel:panda" || router !== "auto:cost");
@@ -273,7 +273,7 @@ test("discovery failures expose no upstream body or transport details", async ()
 test("an authenticated empty grant stays empty in both registered and available inventories", async () => {
   const { provider, refresh, respond } = rig();
   assert.equal(provider.getModels().length, 5);
-  respond(() => Response.json({ data: ["auto","auto:cost","auto:quality","gemma-4-26b"].map(id=>({id})) }));
+  respond(() => Response.json({ data: ["auto","auto:cost","auto:quality","untooled-text-model"].map(id=>({id})) }));
   await refresh();
   assert.deepEqual(provider.getModels().map(model => model.api), ["openai-completions"]);
   assert.deepEqual(provider.getAllModels(), []);
