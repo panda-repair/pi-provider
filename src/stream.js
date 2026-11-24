@@ -101,7 +101,7 @@ async function* frames(chunks) {
   if (data.length) throw new Error();
 }
 
-export function pandaEventStream(response, state, canDisplay, idle, usage) {
+export function pandaEventStream(response, state, canDisplay, idle, usage, selected) {
   const id = supportId(response.headers);
   if (id) state.supportId = id;
   const consumer = new AbortController();
@@ -134,6 +134,8 @@ export function pandaEventStream(response, state, canDisplay, idle, usage) {
           if (state.settled?.status === "running") state.settled = undefined;
         }
         usage.chunk(chunk);
+        // Panda names the model that answered. Pi would record and show it, so keep the selected model.
+        if (selected) chunk.model = selected;
         if (chunk.panda) {
           // Panel member answers belong to Panda. Forward only the validated public receipt.
           chunk.panda = settlement(undefined, chunk.panda);

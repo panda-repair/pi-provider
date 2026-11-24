@@ -114,7 +114,7 @@ def main():
     run(["install", str(ROOT)], "install")
     summary = {"pi": version, "models": {}}
     seen_keys = set()
-    def capture(label, model, fault=None, extension=False, expect=0, native=None, check_cache=False):
+    def capture(label, model, fault=None, extension=False, expect=0, native=None, check_cache=False, save_session=False):
         folder = out / "captures" / label
         folder.mkdir(parents=True)
         fixture = work / "capture-fixture.txt"
@@ -154,7 +154,7 @@ def main():
                     result = run([str(pi.parents[1]), native, model], label, expect,
                                  program=["node", str(ROOT / "test/fixtures/native.mjs")])
                 else:
-                    result = run([*extra, "-p", "--no-session", "--model", "panda/" + model,
+                    result = run([*extra, "-p", *([] if save_session else ["--no-session"]), "--model", "panda/" + model,
                                   "Read capture-fixture.txt with the read tool and give its first line."], label, expect)
                 if check_cache:
                     count = server.recorder.next_id
@@ -228,7 +228,7 @@ def main():
 
     for model in model_ids:
         label = model.replace(":", "-")
-        chat, listed, marker, result, _ = capture(label, model, check_cache=model == model_ids[0])
+        chat, listed, marker, result, _ = capture(label, model, check_cache=model == model_ids[0], save_session=True)
         assert [r["response_mode"] for r in chat] == ["main_read", "main_final"], label
         assert marker not in chat[0]["raw_body"] and marker in result.stdout, label
         assert any(m["role"] == "tool" and marker in str(m["content"]) for m in chat[1]["body"]["messages"]), label
@@ -237,6 +237,17 @@ def main():
             seen_keys.add(key(r))
         summary["models"][model] = {"discovery": len(listed), "chat": len(chat), "contractViolations": 0,
                                     "markerInToolResultAndFinalOutput": True}
+
+    # The mock answers the routers in the name of the model they picked, as Panda does. Pi saves a differing
+    # name as responseModel and shows it in /session, so every saved answer must keep the selected model only.
+    sessions = sorted(Path(env["PI_CODING_AGENT_DIR"]).rglob("*.jsonl"))
+    assert len(sessions) == len(model_ids), sessions
+    entries = [json.loads(line) for path in sessions for line in path.read_text(encoding="utf-8").splitlines() if line]
+    answers = [entry["message"] for entry in entries
+               if entry.get("type") == "message" and entry.get("message", {}).get("role") == "assistant"]
+    assert {answer.get("model") for answer in answers} == set(model_ids), answers
+    assert not [answer for answer in answers if "responseModel" in answer], "Pi saved the model Panda picked"
+    summary["savedSessions"] = {"files": len(sessions), "assistantMessages": len(answers), "responseModel": 0}
 
     summary["mockLedger"] = check_fixture_ledger(mock)
     settings = Path(env["PI_CODING_AGENT_DIR"]) / "settings.json"

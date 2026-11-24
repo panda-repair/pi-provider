@@ -14,6 +14,8 @@ PANDA_SELECTORS = ("auto", "auto:cost", "auto:quality", "panel:panda", "panel:pa
 _grant_file = Path(__file__).resolve().parents[2] / "src" / "routing-backend-grants.json"
 BACKEND_GRANTS = tuple(json.loads(_grant_file.read_text(encoding="utf-8")))
 MODELS = (*PANDA_SELECTORS, *BACKEND_GRANTS, "unknown-test-model")
+# Like Panda, each router answers in the name of what it picked with tools.
+ANSWERED_AS = {"auto:cost": BACKEND_GRANTS[1], "auto": "panel:panda", "auto:quality": "panel:panda-quality"}
 SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "x-api-key", "api-key", "cookie"}
 
 
@@ -277,7 +279,9 @@ class Handler(BaseHTTPRequestHandler):
                 mode, delta, reason = answer_for(body, state.fixture)
                 record.update(response_mode=mode)
                 time.sleep(state.hold)
-                base = {"id": "chatcmpl-local-%d" % record["id"], "created": int(time.time()), "model": body.get("model", "")}
+                requested = body.get("model", "")
+                base = {"id": "chatcmpl-local-%d" % record["id"], "created": int(time.time()),
+                        "model": ANSWERED_AS.get(requested, requested)}
                 usage = {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
                 mode = getattr(state, "scenario", None)
                 panel_usage = mode in ("usage", "panel-context", "routed-context", "oversized-context") and state.recorder.chat_count == 1

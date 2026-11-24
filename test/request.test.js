@@ -704,3 +704,25 @@ test("the byte bound includes the whole UTF-8 SSE and allows large validated err
     assert.doesNotMatch(JSON.stringify(result),/DO_NOT_RECORD/);
   }
 });
+
+test("forwarded chunks name the selected model, not the one Panda answered as", async () => {
+  // Pi saves a differing response model and shows it in /session, so the routers must not reveal their pick.
+  for (const [selected, answeredAs] of [["auto:cost", backendGrants[1]], ["auto", "panel:panda"], ["auto:quality", "panel:panda-quality"]]) {
+    let forwarded = "";
+    const invoke = pandaStream((target, _context, options) => ({ async result() {
+      const reply = await options.fetch(target.baseUrl + "/chat/completions", {
+        method: "POST", body: JSON.stringify({ model: target.id }), headers: { authorization: "Bearer " + options.apiKey },
+      });
+      forwarded = await reply.text();
+      return { ...initial, stopReason: reply.ok ? "stop" : "error" };
+    } }), () => {}, { accounting: settlementAccounting() });
+    const upstream = [{ model: answeredAs, choices: [{ delta: { content: "yes" } }] },
+      { model: answeredAs, choices: [{ delta: {}, finish_reason: "stop" }] }];
+    const result = await invoke({ ...model, id: selected }, {}, { apiKey: "fixture", fetch: async () =>
+      sse(upstream.map(chunk => "data: " + JSON.stringify(chunk) + "\n\n").join("") + "data: [DONE]\n\n") }).result();
+    assert.equal(result.stopReason, "stop", selected);
+    const chunks = forwarded.split("\n\n").filter(frame => frame.startsWith("data: {")).map(frame => JSON.parse(frame.slice(6)));
+    assert.deepEqual(chunks.map(chunk => chunk.model), [selected, selected], selected);
+    assert.ok(!forwarded.includes(answeredAs), selected);
+  }
+});

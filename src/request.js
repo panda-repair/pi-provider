@@ -101,7 +101,7 @@ export function pandaStream(stream, assertAvailable, { observe, accounting, canD
             return stop({ message: "Panda refused an unexpected response endpoint or redirect. " + unknownOutcome });
           }
           if (response.ok && response.body && response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
-            const result = pandaEventStream(response, state, canDisplay, idle, usage);
+            const result = pandaEventStream(response, state, canDisplay, idle, usage, model.id);
             streaming = true;
             return result;
           }
