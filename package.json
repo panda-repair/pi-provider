@@ -1,7 +1,7 @@
 {
   "name": "@panda-repair/pi-provider",
-  "version": "0.1.2",
-  "description": "Use Panda Auto selectors and Panels with Pi’s coding tools.",
+  "version": "0.1.3",
+  "description": "Use Panda’s five models with Pi’s coding tools: Panda Mini, Panda Auto, Panda Mix, Panda Mix Pro and Panda Max.",
   "type": "module",
   "license": "MIT",
   "repository": {"type": "git", "url": "git+https://github.com/panda-repair/pi-provider.git"},

@@ -70,7 +70,7 @@ export function pandaStream(stream, assertAvailable, { observe, accounting, canD
       }
       let wireModel;
       try { wireModel = JSON.parse(init?.body)?.model; } catch { /* The selected target must be identifiable. */ }
-      if (wireModel !== model.id) return stop({ message: "Panda refused a request whose model differs from the selected Auto or Panel." });
+      if (wireModel !== model.id) return stop({ message: "Panda refused a request whose model differs from the selected Panda model." });
       state.key = randomUUID();
       headers.set("Idempotency-Key", state.key);
       // Keep the SDK's wire hint accurate and preserve an explicitly supplied header.

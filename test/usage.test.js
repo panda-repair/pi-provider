@@ -54,10 +54,12 @@ test("only reported Panel aggregate counters produce spending diagnostics, inclu
 
 test("the user guide states the authorization, compaction and settlement rules", () => {
   const guide = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  const rows = [...guide.matchAll(/^\| `panda\/([^`]+)` \| ([\d,]+)/gm)];
-  assert.deepEqual(rows.map(([, id, window]) => [id, Number(window.replaceAll(",", ""))]),
-    catalog.map(model => [model.id, model.contextWindow]));
+  const rows = [...guide.matchAll(/^\| ([^|`]+) \| `panda\/([^`]+)` \| ([\d,]+) \|/gm)]
+    .map(([, name, id, window]) => [id, name, Number(window.replaceAll(",", ""))]);
+  // The guide lists the models from Panda Mini to Panda Max, as Panda's site does; the catalog keeps its order.
+  assert.deepEqual(rows.map(([id]) => id), ["auto:cost", "auto", "panel:panda", "panel:panda-quality", "auto:quality"]);
+  assert.deepEqual(rows.toSorted(), catalog.map(model => [model.id, model.name, model.contextWindow]).toSorted());
   for (const text of ["token saved by `/login` takes precedence over `PANDA_API_TOKEN`", "`/logout`",
-    "187,000", "170,616", "1,022 caller messages", "auto:cost` can fall back to Gemma", "total wait budget of 60 seconds", "up to three", "3/2", "once per run", "pending and may be zero",
+    "187,000", "170,616", "1,022 caller messages", "751,413", "requests without tools to a model with a smaller window", "total wait budget of 60 seconds", "up to three", "3/2", "once per run", "pending and may be zero",
     "ADR 0079 slice C", "httpIdleTimeoutMs", "retry.provider.timeoutMs"]) assert.ok(guide.includes(text), text);
 });

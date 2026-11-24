@@ -101,7 +101,7 @@ export default async function pandaExtension(pi, callerRuntime) {
     if (supported && provider.acceptsTarget(ctx.model)) return true;
     notify(ctx, supported
       ? "Panda requires the openai-completions protocol and the configured provider endpoint. Check the selected model in models.json."
-      : "Select one of Panda's Auto or Panel models in Pi.");
+      : "Select one of Panda's five models in Pi.");
     return false;
   }
   pi.on("session_start", async (_event, ctx) => {
